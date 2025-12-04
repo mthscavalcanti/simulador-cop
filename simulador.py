@@ -3,6 +3,7 @@ Simulador de IPE por Cruzamento – Recife
 Versão Python com Streamlit + Folium
 
 Autor: Adaptado do HTML original
+Correção: Filtro de distância agora mantém a cobertura alvo
 """
 
 import streamlit as st
@@ -125,6 +126,17 @@ st.markdown("""
     /* Ajustar altura do mapa */
     iframe {
         border-radius: 8px;
+    }
+    
+    /* Alerta de cobertura */
+    .coverage-warning {
+        background: rgba(234, 179, 8, 0.2);
+        border: 1px solid rgba(234, 179, 8, 0.5);
+        border-radius: 8px;
+        padding: 0.5rem 0.8rem;
+        margin: 0.5rem 0;
+        font-size: 0.8rem;
+        color: #fbbf24;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -315,27 +327,157 @@ def calcular_ipe_cruzamentos(logs: pd.DataFrame, cruzamentos: pd.DataFrame,
     return df
 
 
-def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, min_dist: float) -> pd.DataFrame:
-    """Filtra cruzamentos por cobertura e distância mínima"""
+def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, min_dist: float, max_cruzamentos: int = None) -> tuple:
+    """
+    Filtra cruzamentos mantendo a cobertura alvo mesmo com filtro de distância.
+    
+    Usa índice espacial R-tree para busca eficiente de vizinhos próximos.
+    Complexidade reduzida de O(n²) para O(n log n).
+    
+    Args:
+        df: DataFrame com cruzamentos ordenados por IPE
+        cobertura_frac: Fração de cobertura alvo (0-1)
+        min_dist: Distância mínima entre cruzamentos em metros
+        max_cruzamentos: Limite máximo de cruzamentos (None = sem limite)
+    
+    Retorna: (DataFrame com selecionados, cobertura_real, cobertura_alvo_atingida, motivo_limite)
+    """
     if df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), 0.0, True, None
     
-    candidatos = df[df['cobertura_acum'] <= cobertura_frac].copy()
+    ipe_total = df['ipe_cruz'].sum()
+    if ipe_total <= 0:
+        return pd.DataFrame(), 0.0, True, None
     
+    # Sem filtro de distância: seleção direta
     if min_dist <= 0:
-        return candidatos
+        df_sorted = df.copy()
+        df_sorted['_cumsum'] = df_sorted['ipe_cruz'].cumsum() / ipe_total
+        df_filtered = df_sorted[df_sorted['_cumsum'] <= cobertura_frac].copy()
+        
+        # Aplicar limite de quantidade se definido
+        motivo = None
+        if max_cruzamentos is not None and len(df_filtered) > max_cruzamentos:
+            df_filtered = df_filtered.head(max_cruzamentos)
+            motivo = 'quantidade'
+        
+        if df_filtered.empty:
+            df_filtered = df.head(1).copy()
+        
+        cobertura_real = df_filtered['ipe_cruz'].sum() / ipe_total
+        df_filtered['cobertura_acum'] = df_filtered['ipe_cruz'].cumsum() / ipe_total
+        df_filtered = df_filtered.drop(columns=['_cumsum'], errors='ignore')
+        
+        alvo_atingido = cobertura_real >= cobertura_frac * 0.99
+        return df_filtered, cobertura_real, alvo_atingido, motivo
+    
+    # Converter distância mínima para graus (aproximação para Recife ~8°S)
+    # 1 grau latitude ≈ 111km, 1 grau longitude ≈ 110km * cos(8°) ≈ 109km
+    graus_buffer = min_dist / 111000 * 1.5  # margem de segurança
+    
+    # Usar rtree para indexação espacial
+    try:
+        from rtree import index
+        usar_rtree = True
+    except ImportError:
+        usar_rtree = False
     
     selecionados = []
-    for _, c in candidatos.iterrows():
-        muito_perto = False
-        for s in selecionados:
-            if distancia_metros(c['lat'], c['lon'], s['lat'], s['lon']) < min_dist:
-                muito_perto = True
-                break
-        if not muito_perto:
-            selecionados.append(c.to_dict())
+    ipe_acumulado = 0.0
+    motivo_limite = None
     
-    return pd.DataFrame(selecionados)
+    if usar_rtree:
+        # Criar índice R-tree
+        idx = index.Index()
+        coords_selecionados = []
+        
+        for i, (_, c) in enumerate(df.iterrows()):
+            # Verificar limite de quantidade
+            if max_cruzamentos is not None and len(selecionados) >= max_cruzamentos:
+                motivo_limite = 'quantidade'
+                break
+            
+            # Verificar se já atingiu a cobertura desejada
+            if ipe_acumulado / ipe_total >= cobertura_frac:
+                break
+            
+            lat, lon = c['lat'], c['lon']
+            
+            # Buscar apenas nos vizinhos próximos via R-tree
+            bbox = (lon - graus_buffer, lat - graus_buffer, 
+                    lon + graus_buffer, lat + graus_buffer)
+            vizinhos_ids = list(idx.intersection(bbox))
+            
+            muito_perto = False
+            for vid in vizinhos_ids:
+                slat, slon = coords_selecionados[vid]
+                if distancia_metros(lat, lon, slat, slon) < min_dist:
+                    muito_perto = True
+                    break
+            
+            if not muito_perto:
+                # Adicionar ao índice e à lista
+                idx.insert(len(coords_selecionados), (lon, lat, lon, lat))
+                coords_selecionados.append((lat, lon))
+                selecionados.append(c.to_dict())
+                ipe_acumulado += c['ipe_cruz']
+    else:
+        # Fallback sem rtree: usar grid espacial simples
+        grid = {}
+        cell_size = min_dist / 111000  # tamanho da célula em graus
+        
+        def get_cell(lat, lon):
+            return (int(lat / cell_size), int(lon / cell_size))
+        
+        def get_neighbor_cells(lat, lon):
+            cx, cy = get_cell(lat, lon)
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    yield (cx + dx, cy + dy)
+        
+        for _, c in df.iterrows():
+            # Verificar limite de quantidade
+            if max_cruzamentos is not None and len(selecionados) >= max_cruzamentos:
+                motivo_limite = 'quantidade'
+                break
+            
+            if ipe_acumulado / ipe_total >= cobertura_frac:
+                break
+            
+            lat, lon = c['lat'], c['lon']
+            
+            # Verificar apenas células vizinhas
+            muito_perto = False
+            for cell in get_neighbor_cells(lat, lon):
+                if cell in grid:
+                    for slat, slon in grid[cell]:
+                        if distancia_metros(lat, lon, slat, slon) < min_dist:
+                            muito_perto = True
+                            break
+                if muito_perto:
+                    break
+            
+            if not muito_perto:
+                cell = get_cell(lat, lon)
+                if cell not in grid:
+                    grid[cell] = []
+                grid[cell].append((lat, lon))
+                selecionados.append(c.to_dict())
+                ipe_acumulado += c['ipe_cruz']
+    
+    if not selecionados:
+        return pd.DataFrame(), 0.0, False, None
+    
+    df_result = pd.DataFrame(selecionados)
+    cobertura_real = ipe_acumulado / ipe_total
+    df_result['cobertura_acum'] = df_result['ipe_cruz'].cumsum() / ipe_total
+    alvo_atingido = cobertura_real >= cobertura_frac * 0.99
+    
+    # Se não atingiu o alvo e não foi por quantidade, foi por distância
+    if not alvo_atingido and motivo_limite is None:
+        motivo_limite = 'distancia'
+    
+    return df_result, cobertura_real, alvo_atingido, motivo_limite
 
 
 def criar_mapa(cruzamentos_selecionados: pd.DataFrame, equipamentos: pd.DataFrame, 
@@ -441,11 +583,19 @@ with st.sidebar:
             st.error(f"Erro: {str(e)}")
     
     # 2. Cobertura
-    st.markdown('<div class="section-title">2. Cobertura de IPE</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">2. Cobertura de IPE (alvo)</div>', unsafe_allow_html=True)
     cobertura_pct = st.slider("Cobertura (%)", 5, 100, 40, key='cobertura')
     
+    # 2b. Quantidade máxima de cruzamentos
+    st.markdown('<div class="section-title">2b. Quantidade máxima (opcional)</div>', unsafe_allow_html=True)
+    usar_limite_qtd = st.checkbox("Limitar quantidade de cruzamentos", value=False, key='usar_limite_qtd')
+    if usar_limite_qtd:
+        max_cruzamentos = st.number_input("Máximo de cruzamentos", min_value=1, max_value=5000, value=100, step=10, key='max_cruz')
+    else:
+        max_cruzamentos = None
+    
     # 3. Distância mínima
-    st.markdown('<div class="section-title">3. Distância mínima</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">3. Distância mínima entre câmeras</div>', unsafe_allow_html=True)
     dist_min = st.slider("Distância (m)", 0, 1000, 150, step=50, key='dist_min')
     
     # 4. Pesos
@@ -479,20 +629,37 @@ with st.sidebar:
 # ============================================================
 # PROCESSAMENTO
 # ============================================================
+cobertura_real = 0.0
+alvo_atingido = True
+motivo_limite = None
+
 if not st.session_state.logs.empty and not st.session_state.cruzamentos.empty:
     st.session_state.cruzamentos_calculados = calcular_ipe_cruzamentos(
         st.session_state.logs, st.session_state.cruzamentos, w_seg, w_lct, w_com, w_mob
     )
 
 if not st.session_state.cruzamentos_calculados.empty:
-    st.session_state.ultimo_selecionados = filtrar_por_cobertura_e_distancia(
-        st.session_state.cruzamentos_calculados, cobertura_pct / 100, dist_min
+    st.session_state.ultimo_selecionados, cobertura_real, alvo_atingido, motivo_limite = filtrar_por_cobertura_e_distancia(
+        st.session_state.cruzamentos_calculados, cobertura_pct / 100, dist_min, max_cruzamentos
     )
 
 # ============================================================
 # ÁREA PRINCIPAL - MAPA E RESUMOS (sem scroll)
 # ============================================================
 st.markdown('<h1 class="main-header">Simulador de IPE por Cruzamento – Recife</h1>', unsafe_allow_html=True)
+
+# Alerta se cobertura alvo não foi atingida
+if not st.session_state.cruzamentos_calculados.empty and not alvo_atingido:
+    if motivo_limite == 'quantidade':
+        st.markdown(f"""<div class="coverage-warning">
+            ⚠️ <b>Exibindo cobertura máxima possível:</b> {cobertura_real*100:.1f}% (alvo: {cobertura_pct}%)<br/>
+            <small>Limite de {max_cruzamentos} cruzamentos atingido. Aumente o limite para maior cobertura.</small>
+        </div>""", unsafe_allow_html=True)
+    else:
+        st.markdown(f"""<div class="coverage-warning">
+            ⚠️ <b>Exibindo cobertura máxima possível:</b> {cobertura_real*100:.1f}% (alvo: {cobertura_pct}%)<br/>
+            <small>Com distância mínima de {dist_min}m, não é possível atingir {cobertura_pct}%. O mapa mostra o máximo atingível.</small>
+        </div>""", unsafe_allow_html=True)
 
 # Layout: Mapa à esquerda, estatísticas à direita
 col_mapa, col_stats = st.columns([2, 1])
@@ -512,7 +679,6 @@ with col_stats:
         df_sel = st.session_state.ultimo_selecionados
         
         total_cruz = len(df_calc)
-        total_cand = len(df_calc[df_calc['cobertura_acum'] <= cobertura_pct/100])
         total_sel = len(df_sel)
         
         # Cobertura por eixo
@@ -539,10 +705,13 @@ with col_stats:
         
         # Exibir estatísticas compactas
         st.markdown("#### 📊 Cruzamentos")
+        limite_str = f'<div class="stat-row"><span>Limite máximo:</span><span class="stat-value">{max_cruzamentos:,}</span></div>' if max_cruzamentos else ''
         st.markdown(f"""<div class="stat-box">
-            <div class="stat-row"><span>Total:</span><span class="stat-value">{total_cruz:,}</span></div>
-            <div class="stat-row"><span>Cobertura {cobertura_pct}%:</span><span class="stat-value">{total_cand:,}</span></div>
-            <div class="stat-row"><span>Filtro distância:</span><span class="stat-value">{total_sel:,}</span></div>
+            <div class="stat-row"><span>Total disponíveis:</span><span class="stat-value">{total_cruz:,}</span></div>
+            <div class="stat-row"><span>Selecionados:</span><span class="stat-value">{total_sel:,}</span></div>
+            {limite_str}
+            <div class="stat-row"><span>Cobertura alvo:</span><span class="stat-value">{cobertura_pct}%</span></div>
+            <div class="stat-row"><span>Cobertura real:</span><span class="stat-value" style="color: {'#4ade80' if alvo_atingido else '#fbbf24'};">{cobertura_real*100:.1f}%</span></div>
         </div>""", unsafe_allow_html=True)
         
         st.markdown("#### 📈 Cobertura por Eixo")
@@ -551,16 +720,6 @@ with col_stats:
             <div class="stat-row"><span>LCT:</span><span class="stat-value">{cov_lct:.1f}%</span></div>
             <div class="stat-row"><span>Comercial:</span><span class="stat-value">{cov_com:.1f}%</span></div>
             <div class="stat-row"><span>Mobilidade:</span><span class="stat-value">{cov_mob:.1f}%</span></div>
-        </div>""", unsafe_allow_html=True)
-        
-        st.markdown("#### 💰 Custo Estimado")
-        st.markdown(f"""<div class="stat-box">
-            <div class="stat-row"><span>PTZ ({qtd_ptz}):</span><span class="stat-value">R$ {qtd_ptz*preco_ptz:,.0f}</span></div>
-            <div class="stat-row"><span>360° ({qtd_360}):</span><span class="stat-value">R$ {qtd_360*preco_360:,.0f}</span></div>
-            <div class="stat-row"><span>Fixa ({qtd_fixa}):</span><span class="stat-value">R$ {qtd_fixa*preco_fixa:,.0f}</span></div>
-            <div class="stat-row"><span>LPR ({qtd_lpr}):</span><span class="stat-value">R$ {qtd_lpr*preco_lpr:,.0f}</span></div>
-            <div class="stat-row" style="border-top:1px solid #444; margin-top:4px; padding-top:4px;">
-                <span><b>Total ({total_cams}):</b></span><span class="stat-value"><b>R$ {custo_total:,.0f}</b></span></div>
         </div>""", unsafe_allow_html=True)
         
         # Download
