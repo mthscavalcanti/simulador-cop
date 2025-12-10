@@ -1,12 +1,3 @@
-"""
-Simulador de IPE por Cruzamento – Recife
-Versão Python com Streamlit + Folium
-
-Autor: Adaptado do HTML original
-Inclui: Filtro de distância, raio de cobertura, limite de cobertura por logradouro,
-        verificação de alagamentos, histórico de sinistros e estatísticas detalhadas
-"""
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -14,6 +5,7 @@ import folium
 from streamlit_folium import st_folium
 import json
 import math
+from pathlib import Path
 
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -24,6 +16,17 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# ============================================================
+# CAMINHOS DOS ARQUIVOS LOCAIS
+# ============================================================
+DATA_DIR = Path("data")
+ARQUIVO_CRUZAMENTOS = DATA_DIR / "Cruzamentos.xlsx"
+ARQUIVO_PRIORIDADES = DATA_DIR / "Prioridades.xlsx"
+ARQUIVO_EQUIPAMENTOS = DATA_DIR / "Equipamentos.xlsx"
+ARQUIVO_BAIRROS = DATA_DIR / "bairros.geojson"
+ARQUIVO_ALAGAMENTOS = DATA_DIR / "Alagamentos.xlsx"
+ARQUIVO_SINISTROS = DATA_DIR / "Sinistros.xlsx"
 
 # ============================================================
 # CSS CUSTOMIZADO - Layout compacto
@@ -117,16 +120,7 @@ st.markdown("""
         font-size: 0.8rem;
         color: #93c5fd;
     }
-    .alert-box {
-        background: rgba(239, 68, 68, 0.15);
-        border: 1px solid rgba(239, 68, 68, 0.4);
-        border-radius: 8px;
-        padding: 0.5rem 0.8rem;
-        margin: 0.5rem 0;
-        font-size: 0.8rem;
-        color: #fca5a5;
-    }
-    .success-box {
+    .highlight-box {
         background: rgba(34, 197, 94, 0.15);
         border: 1px solid rgba(34, 197, 94, 0.4);
         border-radius: 8px;
@@ -139,173 +133,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# CONSTANTES - LISTAS DE ALAGAMENTOS E SINISTROS
-# ============================================================
-ALAGAMENTOS_ALVO = [
-    "AVENIDA CRUZ CABUGA / AVENIDA DR JAYME DA FONTE",
-    "AVENIDA CRUZ CABUGA / AVENIDA NORTE MIGUEL ARRAES DE ALENCAR",
-    "RUA ARARIPINA / RUA DA AURORA",
-    "AVENIDA DANTAS BARRETO / RUA SÃO JOÃO",
-    "AVENIDA DANTAS BARRETO / RUA DO PEIXOTO",
-    "RUA CAPITÃO TEMUDO / PRAÇA GOVERNADOR PAULO GUERRA / AV. ENGENHEIRO JOSÉ ESTELITA",
-    "AVENIDA SUL GOV. CID SAMPAIO / RUA S D 4038",
-    "RUA ITAPIRA / RUA IMPERIAL",
-    "RUA DOS COELHOS / RUA DOUTOR JOSÉ MARIANO",
-    "RUA QUARENTA E OITO / AVENIDA NORTE MIGUEL ARRAES DE ALENCAR",
-    "RUA ARÃO BOTLER / AVENIDA CIDADE DE MONTEIRO",
-    "AVENIDA GOVERNADOR AGAMENON MAGALHÃES",
-    "RUA JOSÉ BENTO BATISTA / AVENIDA CORREIA DE BRITO",
-    "RUA DR BANDEIRA FILHO /AVENIDA GOVERNADOR AGAMENON MAGALHÃES",
-    "RUA DA MANGABEIRA / AVENIDA NORTE MIGUEL ARRAES DE ALENCAR",
-    "RUA IDA / AVENIDA NORTE MIGUEL ARRAES DE ALENCAR",
-    "AVENIDA DA RECUPERAÇÃO / ENTRADA COMPLEXO DA MACAXEIRA",
-    "RUA CERRO AZUL / RUA NOVA DESCOBERTA / RUA CÓRREGO DA AREIA",
-    "RUA DELMIRO GOUVEIA / AVENIDA ENGENHEIRO ABDIAS DE CARVALHO",
-    "RUA BENFICA / AVENIDA SPORT CLUBE DO RECIFE",
-    "RUA HÉRCULES FLORENCE / AVENIDA ENGENHEIRO ABDIAS DE CARVALHO",
-    "RUA AMÁLIA / AVENIDA GENERAL SAN MARTIN",
-    "RUA GOMES TABORDA / RUA QUATRO DE OUTUBRO",
-    "AVENIDA GENERAL SAN MARTIN / AVENIDA CAXANGÁ",
-    "RUA REAL DA TORRE / RUA PROFESSORA ANUNCIADA DA ROCHA MELO",
-    "AVENIDA PROFESSOR MORAES REGO / AVENIDA CAXANGÁ",
-    "AVENIDA BARÃO DE BONITO / AVENIDA CAXANGÁ",
-    "RUA BENFICA / PRAÇA DO INTERNACIONAL",
-    "AVENIDA ENGENHEIRO ABDIAS DE CARVALHO / AVENIDA GENERAL SAN MARTIN",
-    "AVENIDA SUL GOV. CID SAMPAIO / RUA NICOLAU PEREIRA",
-    "RUA NICOLAU PEREIRA / RUA DO ACRE",
-    "RUA VISCONDE DE PELOTAS / RUA VISCONDE DE INHAUMA",
-    "AVENIDA CENTRAL / RUA VISCONDE DE PELOTAS",
-    "AVENIDA JOÃO CABRAL DE MELO NETO / AVENIDA RECIFE",
-    "ENTRADA DA RUA DOUTOR JOSÉ RUFINO / AVENIDA DOUTOR JOSÉ RUFINO / RODOVIA BR 101",
-    "RUA DOMINGOS TEOTONIO /AVENIDA DOUTOR JOSÉ RUFINO",
-    "RUA JOÃO TEIXEIRA / AVENIDA DOUTOR JOSÉ RUFINO",
-    "RUA LORENA / RUA LEANDRO BARRETO",
-    "AVENIDA CONSELHEIRO AGUIAR / AVENIDA ANTÔNIO DE GOES",
-    "RUA ZEFERINO PINHO / RUA OLIVIA MENELAU",
-    "AVENIDA MARECHAL MASCARENHAS DE MORAES / RUA CÔNEGO LIRA",
-    "AVENIDA MARECHAL MASCARENHAS DE MORAES / RUA ANTÔNIO EDUARDO AMORIM",
-    "RUA PAMPULHA / AVENIDA MARECHAL MASCARENHAS DE MORAES",
-    "RUA ADERBAL DE MELO / AVENIDA RECIFE",
-    "RUA HÉLIO BRANDÃO / RUA SÃO NICOLAU",
-    "RUA PINTOR AGENOR DE ALBUQUERQUE CÉSAR / AVENIDA DOIS RIOS",
-    "RUA VISCONDE DE JEQUITINHONHA / RUA RIBEIRO DE BRITO",
-    "RUA AMÁLIA BERNARDINO DE SOUZA / RUA ERNESTO DE PAULA SANTOS",
-    "AVENIDA CONSELHEIRO AGUIAR / RUA PADRE CARAPUCEIRO",
-    "RUA PROFESSOR JOSÉ BRANDÃO / AVENIDA CONSELHEIRO AGUIAR"
-]
-
-RUAS_SINISTROS_ALVO = [
-    "AVENIDA ENGENHEIRO ABDIAS DE CARVALHO", "ESTRADA VELHA DE AGUA FRIA", "AVENIDA BRASILIA FORMOSA",
-    "AVENIDA MARECHAL MASCARENHAS DE MORAES", "RUA SAO MATEUS", "AVENIDA HERCULANO BANDEIRA",
-    "RUA EMILIO MONTEIRO FONSECA", "RUA PAISSANDU", "ESTRADA DE BELEM", "AVENIDA GOVERNADOR AGAMENON MAGALHAES",
-    "RUA SAO MIGUEL", "AVENIDA NORTE MIGUEL ARRAES DE ALENCAR", "RUA JOSE BONIFACIO", "PONTE GREGORIO BEZERRA",
-    "RUA SOUZA BANDEIRA", "RUA FALCAO DE LACERDA", "AVENIDA MAURICIO DE NASSAU", "RUA JOAO LIRA",
-    "AVENIDA PROFESSOR JOSE DOS ANJOS", "RUA GASTAO VIDIGAL", "AVENIDA DOUTOR JOSE RUFINO", "1A TRAVESSA SAO MIGUEL",
-    "AVENIDA ENGENHEIRO DOMINGOS FERREIRA", "RUA PROFESSOR ANTONIO COELHO", "RUA GENERAL JOAQUIM INACIO",
-    "RUA LEONARDO BEZERRA CAVALCANTI", "RUA JOAQUIM BANDEIRA", "PONTE GOVERNADOR PAULO GUERRA", "AVENIDA DOIS RIOS",
-    "RUA PRINCESA ISABEL", "AVENIDA RUI BARBOSA", "AVENIDA VISCONDE DE ALBUQUERQUE", "AVENIDA BOA VIAGEM",
-    "AVENIDA AFONSO OLINDENSE", "RUA DA HARMONIA", "AVENIDA RECIFE", "RUA ITAJAI", "RUA PEREIRA COUTINHO FILHO",
-    "RUA OLIVIA MENELAU", "RUA DE APIPUCOS", "RUA GASPAR PEREZ", "AVENIDA SUL GOVERNADOR CID SAMPAIO",
-    "RUA PADRE TEOFILO TWORZ", "RUA FLORIANO PEIXOTO", "RUA DONA JULIETA", "RUA GENERAL POLIDORO",
-    "RUA PROFESSOR AURELIO DE CASTRO CAVALCANTI", "RUA DEZ DE JULHO", "AVENIDA HILDEBRANDO DE VASCONCELOS",
-    "RUA CAPITAO ANTONIO MANHAES DE MATTOS", "AVENIDA GENERAL SAN MARTIN", "RUA GOMES TABORDA", "AVENIDA CRUZ CABUGA",
-    "RUA JOSE OSORIO", "AVENIDA DEZESSETE DE AGOSTO", "RUA BARAO DE SOUZA LEAO", "RUA VISCONDE DE JEQUITINHONHA",
-    "RUA FERNANDO CESAR", "RUA ALBERTO PAIVA", "AVENIDA MARIA IRENE", "RUA DESENHISTA EULINO SANTOS",
-    "AVENIDA GENERAL MAC ARTHUR", "RUA CAPITAO TEMUDO", "RUA RAUL POMPEIA", "RUA JOAQUIM NABUCO",
-    "VIADUTO PAPA JOAO PAULO II", "AVENIDA ARMINDO MOURA", "AVENIDA BEBERIBE SANTA CRUZ FUTEBOL CLUBE",
-    "PRACA DA REPUBLICA", "CAIS DE SANTA RITA", "RUA REAL DA TORRE", "RUA RIBEIRO DE BRITO", "RUA PADRE LEMOS",
-    "RUA DESEMBARGADOR MARTINS PEREIRA", "AVENIDA CONSELHEIRO AGUIAR", "AVENIDA CAXANGA", "AVENIDA DOM JOAO VI",
-    "AVENIDA DANTAS BARRETO", "PRACA DAS CINCO PONTAS", "RUA JUNDIA", "RUA JOAO IVO DA SILVA", "RUA EMILIANO BRAGA",
-    "ESTRADA DO BONGI ARMANDO DA FONTE", "AVENIDA CELSO FURTADO", "RUA BOLIVAR", "RUA CORONEL URBANO RIBEIRO DE SENA",
-    "RUA DA ENCOSTA", "RUA IMPERIAL", "RUA POTENGY", "RUA DONA BENVINDA DE FARIAS", "RUA BENFICA",
-    "CORREGO DO BARTOLOMEU", "AVENIDA PREFEITO ARTUR LIMA CAVALCANTI", "AVENIDA JOSE GONCALVES DE MEDEIROS",
-    "RUA SANTA EDWIRGES", "RUA RIO MARANHAO", "ESTRADA DO ARRAIAL", "VIADUTO ENGENHEIRO ANTONIO DE QUEIROZ GALVAO",
-    "AVENIDA JOAO DE BARROS", "AVENIDA JOAO CABRAL DE MELO NETO", "AVENIDA PROFESSOR LUIZ FREIRE", "RUA TABAIARES",
-    "RUA MANOEL DE BRITO", "RUA MANUEL DE BARROS LIMA", "AVENIDA INACIO MONTEIRO", "AVENIDA PRESIDENTE DUTRA",
-    "RUA AMELIA", "RUA PROFESSOR CHAVES BATISTA", "RUA TENENTE ROLAND RITTMISTER", "RUA CHA DE ALEGRIA",
-    "RUA ITACARI", "RUA GENERAL GOES MONTEIRO", "RUA JOAO DIAS MARTINS", "RUA GUANABARA", "ESTRADA DOS REMEDIOS",
-    "AVENIDA SERRA DA MANTIQUEIRA", "RUA DOIS IRMAOS", "RUA CORREGO DO EUCLIDES", "RUA DOM PAULO II",
-    "TRAVESSA DO RAPOSO", "PONTE MARECHAL HUMBERTO CASTELO BRANCO", "RUA CAPITAO ZUZINHA", "AVENIDA GUARARAPES",
-    "RUA CRUZEIRO DO FORTE", "RUA QUARENTA E OITO", "AVENIDA JORNALISTA COSTA PORTO", "RUA JACOB", "RUA DA SOLEDADE",
-    "AVENIDA SANTOS DUMONT", "RUA BOMBA DO HEMETERIO", "RUA CARLOS FERNANDES", "AVENIDA ENGENHEIRO JOSE ESTELITA",
-    "RUA SOUZA DE ANDRADE", "AVENIDA JOSE AMERICO DE ALMEIDA", "RUA CONEGO JOSE FERNANDES MACHADO",
-    "RUA MARECHAL DEODORO", "AVENIDA RIO LARGO", "RUA ALVARES DE AZEVEDO", "AVENIDA ENCANTA MOCA", "RUA MOTOCOLOMBO",
-    "TRAVESSA HERMILIO GOMES", "RUA SEBASTIAO MALTA ARCOVERDE", "RUA JACK AYRES", "RUA CATULO DA PAIXAO CEARENSE",
-    "RUA DA CONCORDIA", "RUA EXPEDICIONARIO TEODORO SATIVA", "PONTE DE AFOGADOS", "AVENIDA MANOEL GONCALVES DA LUZ",
-    "RUA FREI CASSIMIRO", "RUA VINTE E UM DE ABRIL", "AVENIDA DOM HELDER CAMARA", "RUA PROFESSOR AUGUSTO LINS E SILVA",
-    "RUA JOAO UZEDA LUNA", "RUA PARIS", "RUA JOAO TUDE DE MELO", "RUA SETUBAL", "RUA DO VEIGA", "RUA MANUEL DE MEDEIROS",
-    "PONTE VICE PRESIDENTE JOSE ALENCAR", "RUA DOS PALMARES", "RUA ALTO JOSE BONIFACIO", "RUA IMPERADOR DOM PEDRO II",
-    "PONTE JOSE DE BARROS LIMA", "ESTRADA DO FORTE DO ARRAIAL NOVO DO BOM JESUS", "RUA JERONIMO VILELA", "RUA DO SOL",
-    "RUA BARAO DE VERA CRUZ", "RUA JEAN EMILE FAVRE", "RUA DO HOSPICIO", "AVENIDA GOVERNADOR CARLOS DE LIMA CAVALCANTI",
-    "RUA BARAO DE MURIBECA", "RUA CONSELHEIRO PERETTI", "RUA ALEGRE", "RUA CONSELHEIRO PORTELA",
-    "AVENIDA CIDADE DE MONTEIRO", "RUA ARTHUR BRUNO SCHWAMBACH", "AVENIDA SPORT CLUBE DO RECIFE",
-    "RUA AMAURI DE MEDEIROS", "AVENIDA FLOR DE SANTANA", "RUA DO MACHADO", "RUA TREZE DE MAIO", "AVENIDA MARIO MELO",
-    "RUA OSCAR DE BARROS", "TRAVESSA DA RECUPERACAO", "RUA PROFESSOR JOAQUIM XAVIER DE BRITO", "ESTRADA DO ENCANAMENTO",
-    "AVENIDA SENADOR ROBERT KENNEDY", "RUA ONZE DE AGOSTO", "CANAL DO JORDAO", "RUA JOAO CARDOSO AIRES",
-    "RUA PROFESSOR JOSE AMARINO DOS REIS", "CAIS DO APOLO", "RUA REZENDE",
-    "AVENIDA DOUTOR DIRCEU VELLOSO TOSCANO DE BRITO", "AVENIDA PROFESSOR ESTEVAO FRANCISCO DA COSTA",
-    "AVENIDA DA RECUPERACAO", "RUA PADRE ROMA", "RUA PROFESSOR MARIO CASTRO", "RUA ANTONIO CURADO",
-    "AVENIDA VEREADOR OTACILIO AZEVEDO", "RUA BARAO DE ITAMARACA", "RUA ODORICO MENDES", "RUA DESEMBARGADOR LUIZ SALAZAR",
-    "RUA BARAO DE AGUA BRANCA", "PRACA MIGUEL DE CERVANTES", "AVENIDA REPUBLICA DO LIBANO", "RUA DA ESPERANCA",
-    "RUA SANTO ELIAS", "RUA IPOJUCA", "RUA CAMPOS TABAIARES", "RUA ERNESTO DE PAULA SANTOS", "AVENIDA LIBERDADE",
-    "RUA DAS MOCAS", "RUA SANT'ANNA", "VIADUTO PRESIDENTE TANCREDO NEVES", "RUA ITABORA",
-    "RUA PROFESSOR TRAJANO DE MENDONCA", "RUA MARCILIO DIAS", "RUA JOSE DE ALENCAR", "AVENIDA ESTANCIA",
-    "RUA FREI MATIAS TEVIS", "AVENIDA VISCONDE DE SUASSUNA", "RUA WILFRID RUSSEL SHORTO", "RUA AURORA CACOTE",
-    "RUA OCIDENTAL", "RUA DAS CREOULAS", "ESTRADA DO BARBALHO", "RUA ALBINO MEIRA", "RUA RIO TAPADO", "RUA DOM BOSCO",
-    "RUA DO PRINCIPE", "VIADUTO DAS CINCO PONTAS", "RUA ZUMBI DOS PALMARES", "RUA ROSARIO DA BOA VISTA",
-    "RUA PAULA BATISTA", "AVENIDA SAO PAULO", "RUA VASCO DA GAMA", "RUA CONSELHEIRO NABUCO", "PRACA DA RUA GOMES TABORDA",
-    "RUA ENGENHEIRO JOSE BRANDAO CAVALCANTE", "RUA CLOVIS BEVILAQUA", "PRACA DO ENTRONCAMENTO",
-    "AVENIDA PREFEITO LIMA CASTRO", "RUA DO ESPINHEIRO", "AVENIDA ANTONIO DE GOES", "RUA MARQUES AMORIM",
-    "RUA DA REGENERACAO", "RUA DOUTOR GASTAO DA SILVEIRA", "RUA CLAUDIO BROTHERHOOD", "AVENIDA JOAQUIM RIBEIRO",
-    "RUA MANOEL DE ALBUQUERQUE FERNANDES", "AVENIDA MILITAR", "RUA DOIS DE JULHO", "AVENIDA PROFESSOR ARTUR DE SA",
-    "RUA ROMULO PESSOA", "RUA COSME VIANA", "RUA HIPOLITO BRAGA", "PRACA ABELARDO RIJO", "RUA ESTADO DE ISRAEL",
-    "RUA ARQUITETO LUIZ NUNES", "RUA DAS CALCADAS", "RUA PASCOAL SIVINI", "AVENIDA CONDE DA BOA VISTA",
-    "AVENIDA MARTINS DE BARROS", "RUA PRESIDENTE HONORIO HERMETO", "RUA JAMAICA", "PONTE DO MOTOCOLOMBO",
-    "RUA DO FUTURO", "RUA JUNDIAI", "RUA DOS NAVEGANTES", "RUA DESEMBARGADOR OTILIO NEIVA", "AVENIDA CHAPADA DO ARARIPE",
-    "AVENIDA DOUTOR JAYME DA FONTE", "AVENIDA BEIRA RIO DEPUTADO OSVALDO COELHO", "RUA BALTAZAR PASSOS",
-    "RUA JACO VELOSINO", "AVENIDA CHAGAS FERREIRA", "RUA VALE DO ITAJAI", "RUA DOUTOR EUDES COSTA", "RUA EDSON ALVARES",
-    "AVENIDA IZABEL DE GOES", "RUA PAULINO DE FARIAS", "AVENIDA TAPAJOS", "RUA DONA MAGINA PONTUAL",
-    "2A TRAVESSA MARQUES DE BAIPENDI", "RUA SENADOR JOSE HENRIQUE", "RUA PARATIBE", "RUA FELIX DE BRITO E MELO",
-    "AVENIDA ANTONIO TORRES GALVAO", "RUA VIRGINIA LORETO", "RUA NOGUEIRA DE SOUZA", "RUA GALVAO RAPOSO",
-    "RUA COMENDADOR MORAIS", "RUA CARLOS GOMES", "RUA MARQUES DE MARICA", "RUA MARQUES DE BAIPENDI", "RUA CAMBOIM",
-    "AVENIDA MANOEL BORBA", "RUA PROFESSOR ARNALDO CARNEIRO LEAO", "RUA MINISTRO MARIO ANDREAZZA", "RUA RIO TOCANTINS",
-    "RUA VALE DO SIRIJI", "AVENIDA SEBASTIAO SALAZAR", "RUA PROFESSOR JOSE BRANDAO", "RUA COUTO MAGALHAES",
-    "RUA SA E SOUZA", "RUA HENRIQUE CAPITULINO", "RUA AGRICOLANDIA", "RUA CANAVIEIRA", "RUA AMARO COUTINHO",
-    "RUA DO PEIXOTO", "RUA SAO SEBASTIAO", "RUA DOUTOR CARLOS MAVIGNIER", "RUA CLARA", "RUA MARQUES DE VALENCA",
-    "RUA PROFESSOR JERONIMO GUEIROS", "RUA URIEL DE HOLANDA", "AVENIDA CENTENARIO ALBERTO SANTOS DUMONT",
-    "RUA DA AURORA", "RUA HONORIO CORREIA", "RUA DOUTOR ALVARO FERRAZ", "RUA BADEJO", "RUA TELES JUNIOR",
-    "RUA PINTOR ANTONIO ALBUQUERQUE", "RUA AMALIA BERNARDINO DE SOUZA", "RUA PRUDENTE DE MORAES", "RUA PADRE MIGUELINHO",
-    "RUA EVARISTO DA VEIGA", "RUA DO POMBAL", "CAIS DO PORTO DO RECIFE", "RUA QUITERIO INACIO DE MELO",
-    "RUA NOVA DESCOBERTA", "RUA JORNALISTA EDMUNDO BITTENCOURT", "RUA DOUTOR VICENTE GOMES", "LADEIRA DA COHAB",
-    "PONTE PRINCESA IZABEL", "RUA PADRE LANDIM", "RUA BLUMENAU", "AVENIDA PARNAMIRIM", "AVENIDA SATURNINO DE BRITO",
-    "AVENIDA CORREIA DE BRITO", "RUA RAIMUNDO FREIXEIRA", "RUA GERVASIO FIORAVANTE", "RUA GOIANESIA",
-    "PONTE ESTACIO COIMBRA", "RUA MARECHAL MANOEL LUIS OSORIO", "AVENIDA FERNANDO SIMOES BARBOSA",
-    "RUA MARQUES DO PARANA", "PRACA JORNALISTA FRANCISCO PESSOA DE QUEIROZ", "AVENIDA CONSELHEIRO ROSA E SILVA",
-    "RUA GUAIANAZES", "RUA NESTOR SILVA", "PONTE DO LIMOEIRO", "RUA CRISTOVAO JAQUES", "RUA MEM DE SA",
-    "RUA JOSE NATARIO", "RUA ANTONIO FALCAO", "RUA PAMPULHA", "RUA FRANCISCO ALVES", "RUA ALMIRANTE TAMANDARE",
-    "RUA DAS GRACAS", "RUA ALTO DO RESERVATORIO", "AVENIDA DONA CARENTINA", "TRAVESSA DO CAIS DA DETENCAO",
-    "AVENIDA DESEMBARGADOR GUERRA BARRETO", "AVENIDA DESEMBARGADOR JOSE NEVES", "PRACA DO DERBY",
-    "RUA DEMOCRITO DE SOUZA FILHO", "RUA PEDRO AFONSO", "AVENIDA CAMPO VERDE", "RUA JOAO FRANCISCO LISBOA",
-    "RUA DOUTOR GEORGE WILLIAM BUTLER", "RUA VALE DO CARIRI", "RUA TAQUARITINGA", "PRACA DA BANDEIRA",
-    "RUA PADRE CARAPUCEIRO", "RUA SARGENTO SILVINO MACEDO", "RUA MAURICEIA", "RUA DA FELICIDADE", "RUA SANTA CECILIA",
-    "RUA FARIAS NEVES", "RUA BELA VISTA", "AVENIDA PROFESSOR JOAO MEDEIROS", "RUA PADRE DEHON",
-    "RUA COMENDADOR BENTO AGUIAR", "RUA DOS COELHOS", "RUA HELIO BRANDAO", "RUA DESEMBARGADOR GOIS CAVALCANTE",
-    "RUA DA GUIA", "RUA LEANDRO BARRETO", "RUA JOSE DOMINGUES DA SILVA", "RUA ANDRE BEZERRA", "RUA MARAGOGI",
-    "RUA ISAAC MARKMAN", "RUA DOS PRAZERES", "RUA RIO XINGU", "RUA NOSSA SENHORA DA SAUDE", "RUA DAS NINFAS",
-    "RUA ERNANI BRAGA", "AVENIDA DOZE DE JUNHO", "RUA PROFESSOR FRANCISCO DA TRINDADE", "RUA DELMIRO GOUVEIA",
-    "RUA VISCONDE DE CAIRU", "RUA OUREM", "RUA ARTUR COUTINHO", "RUA RIBEIRO PESSOA", "RUA PROFESSORA ROSILDA COSTA",
-    "RUA DOM MANOEL DA COSTA", "RUA DE SANTA RITA", "RUA SETE PECADOS", "PRACA GENERAL ABREU E LIMA",
-    "RUA DOUTOR JOAO ELISIO", "RUA DA SANTA CRUZ", "AVENIDA RAIMUNDO DINIZ", "RUA OSCAR PINTO", "RUA S D 9806",
-    "RUA TEOLANDIA", "RUA JOAO FERNANDES VIEIRA", "RUA PREFEITO JORGE MARTINS", "RUA REGUEIRA COSTA", "RUA PIRACANJUBA",
-    "AVENIDA SANTA FE", "AVENIDA BARBOSA LIMA", "RUA ADERBAL DE MELO", "RUA ANITA",
-    "RUA DEPUTADO JOSE FRANCISCO DE MELO CAVALCANTI", "RUA FRANKLIN TAVORA", "RUA EDUARDO JORGE",
-    "RUA ACADEMICO HELIO RAMOS", "RUA GOUVEIA DE BARROS", "RUA DA UNIAO", "RUA CONEGO BARATA", "PRACA FARIAS NEVES",
-    "RUA PADRE CABRAL", "RUA TRES DE AGOSTO", "RUA TOME GIBSON", "RUA PETRONILA BOTELHO", "RUA CAFESOPOLIS",
-    "RUA SANTOS ARAUJO", "RUA FONSECA OLIVEIRA"
-]
-
-# ============================================================
-# INICIALIZAÇÃO DO SESSION STATE
+# INICIALIZAÇÃO DO SESSION STATE - AJUSTE 3 APLICADO
 # ============================================================
 if 'logs' not in st.session_state:
     st.session_state.logs = pd.DataFrame()
@@ -315,10 +143,25 @@ if 'cruzamentos_calculados' not in st.session_state:
     st.session_state.cruzamentos_calculados = pd.DataFrame()
 if 'equipamentos' not in st.session_state:
     st.session_state.equipamentos = pd.DataFrame()
+# ===== AJUSTE 3: ESTADOS PARA CHECKBOXES (SIMPLIFICADO) =====
+if 'mostrar_pontos_minimos' not in st.session_state:
+    st.session_state.mostrar_pontos_minimos = True
+if 'mostrar_pontos_ipe' not in st.session_state:
+    st.session_state.mostrar_pontos_ipe = True
+# ===== FIM AJUSTE 3 =====
 if 'bairros_geojson' not in st.session_state:
     st.session_state.bairros_geojson = None
 if 'ultimo_selecionados' not in st.session_state:
     st.session_state.ultimo_selecionados = pd.DataFrame()
+if 'pontos_minimos' not in st.session_state:
+    st.session_state.pontos_minimos = pd.DataFrame()
+if 'alagamentos' not in st.session_state:
+    st.session_state.alagamentos = pd.DataFrame()
+if 'sinistros' not in st.session_state:
+    st.session_state.sinistros = pd.DataFrame()
+if 'arquivos_carregados' not in st.session_state:
+    st.session_state.arquivos_carregados = False
+
 
 # ============================================================
 # FUNÇÕES AUXILIARES
@@ -337,63 +180,268 @@ def distancia_metros(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
     return R * c
 
 
-def sugerir_tipo_camera(seg_tot: float, lct_tot: float, com_tot: float, mob_tot: float) -> str:
-    """Sugere tipo de câmera baseado nos eixos predominantes"""
-    candidatos = [("PTZ", seg_tot), ("360", lct_tot), ("FIXA", com_tot), ("LPR", mob_tot)]
-    candidatos.sort(key=lambda x: x[1], reverse=True)
-    return candidatos[0][0] if candidatos[0][1] > 0 else "FIXA"
-
-
-def verificar_alagamentos(df_selecionados: pd.DataFrame) -> list:
-    """Verifica quais cruzamentos selecionados são pontos de alagamento"""
-    alagamentos_encontrados = []
-    if df_selecionados.empty:
-        return alagamentos_encontrados
+def verificar_alagamentos_por_raio(df_cameras: pd.DataFrame, df_alagamentos: pd.DataFrame, raio_metros: float) -> list:
+    """Verifica quais pontos de alagamento estão dentro do raio de cobertura das câmeras"""
+    if df_cameras.empty or df_alagamentos.empty:
+        return []
     
-    lista_alvo_norm = [x.strip().upper() for x in ALAGAMENTOS_ALVO]
-    for _, row in df_selecionados.iterrows():
-        l1 = str(row['log1']).strip().upper()
-        l2 = str(row['log2']).strip().upper()
-        comb1 = f"{l1} / {l2}"
-        comb2 = f"{l2} / {l1}"
-        if comb1 in lista_alvo_norm:
-            alagamentos_encontrados.append(comb1)
-        elif comb2 in lista_alvo_norm:
-            alagamentos_encontrados.append(comb2)
+    alagamentos_cobertos = []
     
-    return alagamentos_encontrados
-
-
-def verificar_sinistros(df_selecionados: pd.DataFrame) -> list:
-    """Verifica quais ruas dos cruzamentos selecionados têm histórico de sinistros"""
-    sinistros_encontrados = []
-    if df_selecionados.empty:
-        return sinistros_encontrados
-    
-    lista_sinistros_norm = set([x.strip().upper() for x in RUAS_SINISTROS_ALVO])
-    ruas_unicas_encontradas = set()
-    
-    for _, row in df_selecionados.iterrows():
-        l1 = str(row['log1']).strip().upper()
-        l2 = str(row['log2']).strip().upper()
+    for _, alag in df_alagamentos.iterrows():
+        alag_lat = alag['lat']
+        alag_lon = alag['lon']
+        alag_nome = alag.get('nome', f"Alagamento {alag.get('id', '')}")
         
-        if l1 in lista_sinistros_norm:
-            ruas_unicas_encontradas.add(l1)
-        if l2 in lista_sinistros_norm:
-            ruas_unicas_encontradas.add(l2)
+        coberto = False
+        for _, cam in df_cameras.iterrows():
+            cam_lat = cam['lat']
+            cam_lon = cam['lon']
+            
+            if distancia_metros(alag_lat, alag_lon, cam_lat, cam_lon) <= raio_metros:
+                coberto = True
+                break
+        
+        if coberto:
+            alagamentos_cobertos.append(alag_nome)
     
-    return sorted(list(ruas_unicas_encontradas))
+    return alagamentos_cobertos
 
 
-def carregar_excel_cruzamentos(file) -> tuple:
+def verificar_sinistros_por_logradouro(df_cruzamentos_selecionados: pd.DataFrame, df_sinistros: pd.DataFrame) -> tuple:
+    """Verifica quais logradouros com sinistros têm cobertura de câmeras"""
+    if df_cruzamentos_selecionados.empty or df_sinistros.empty:
+        return 0, 0, []
+    
+    sinistros_dict = {}
+    for _, row in df_sinistros.iterrows():
+        log_norm = str(row['logradouro']).strip().upper()
+        qtd = int(row.get('qtd', 1))
+        sinistros_dict[log_norm] = qtd
+    
+    logradouros_cobertos = {}
+    
+    for _, cruz in df_cruzamentos_selecionados.iterrows():
+        log1 = str(cruz.get('log1', '')).strip().upper()
+        log2 = str(cruz.get('log2', '')).strip().upper()
+        
+        if log1 in sinistros_dict and log1 not in logradouros_cobertos:
+            logradouros_cobertos[log1] = sinistros_dict[log1]
+        
+        if log2 in sinistros_dict and log2 not in logradouros_cobertos:
+            logradouros_cobertos[log2] = sinistros_dict[log2]
+    
+    qtd_sinistros_cobertos = sum(logradouros_cobertos.values())
+    total_sinistros = sum(sinistros_dict.values())
+    lista_logradouros = list(logradouros_cobertos.keys())
+    
+    return qtd_sinistros_cobertos, total_sinistros, lista_logradouros
+
+def calcular_cobertura_por_logradouro_ajustada(df_calculados: pd.DataFrame, ids_cobertos: set, logs: pd.DataFrame) -> tuple:
+    """
+    Calcula cobertura por logradouro com regra de 50%:
+    - Se logradouro tem >= 50% de cobertura efetiva, considera 100%
+    - Se < 50%, mantém a cobertura atual
+    
+    Retorna: (cobertura_ajustada_total, dict_por_eixo, detalhes_logradouros)
+    """
+    if df_calculados.empty or logs.empty:
+        return 0.0, {'seg': 0.0, 'lct': 0.0, 'com': 0.0, 'mob': 0.0, 'qtd_100': 0, 'total_logs': 0}, []
+    
+    logs_dict = {}
+    for _, log in logs.iterrows():
+        cod_log = int(log['cod_log'])
+        logs_dict[cod_log] = {
+            'nome': log['nome'],
+            'seg': log['seg'],
+            'lct': log['lct'],
+            'com': log['com'],
+            'mob': log['mob']
+        }
+    
+    ipe_total_por_log = {}
+    for _, cruz in df_calculados.iterrows():
+        cod1, cod2 = cruz['cod_log1'], cruz['cod_log2']
+        ipe = cruz['ipe_cruz']
+        
+        if cod1 not in ipe_total_por_log:
+            ipe_total_por_log[cod1] = {'total': 0, 'seg': 0, 'lct': 0, 'com': 0, 'mob': 0}
+        if cod2 not in ipe_total_por_log:
+            ipe_total_por_log[cod2] = {'total': 0, 'seg': 0, 'lct': 0, 'com': 0, 'mob': 0}
+        
+        ipe_total_por_log[cod1]['total'] += ipe
+        ipe_total_por_log[cod2]['total'] += ipe
+        
+        ipe_total_por_log[cod1]['seg'] += cruz['ipe_cruz_seg']
+        ipe_total_por_log[cod1]['lct'] += cruz['ipe_cruz_lct']
+        ipe_total_por_log[cod1]['com'] += cruz['ipe_cruz_com']
+        ipe_total_por_log[cod1]['mob'] += cruz['ipe_cruz_mob']
+        
+        ipe_total_por_log[cod2]['seg'] += cruz['ipe_cruz_seg']
+        ipe_total_por_log[cod2]['lct'] += cruz['ipe_cruz_lct']
+        ipe_total_por_log[cod2]['com'] += cruz['ipe_cruz_com']
+        ipe_total_por_log[cod2]['mob'] += cruz['ipe_cruz_mob']
+    
+    ipe_coberto_por_log = {}
+    df_cobertos = df_calculados[df_calculados['id'].isin(ids_cobertos)]
+    
+    for _, cruz in df_cobertos.iterrows():
+        cod1, cod2 = cruz['cod_log1'], cruz['cod_log2']
+        ipe = cruz['ipe_cruz']
+        
+        if cod1 not in ipe_coberto_por_log:
+            ipe_coberto_por_log[cod1] = {'total': 0, 'seg': 0, 'lct': 0, 'com': 0, 'mob': 0}
+        if cod2 not in ipe_coberto_por_log:
+            ipe_coberto_por_log[cod2] = {'total': 0, 'seg': 0, 'lct': 0, 'com': 0, 'mob': 0}
+        
+        ipe_coberto_por_log[cod1]['total'] += ipe
+        ipe_coberto_por_log[cod2]['total'] += ipe
+        
+        ipe_coberto_por_log[cod1]['seg'] += cruz['ipe_cruz_seg']
+        ipe_coberto_por_log[cod1]['lct'] += cruz['ipe_cruz_lct']
+        ipe_coberto_por_log[cod1]['com'] += cruz['ipe_cruz_com']
+        ipe_coberto_por_log[cod1]['mob'] += cruz['ipe_cruz_mob']
+        
+        ipe_coberto_por_log[cod2]['seg'] += cruz['ipe_cruz_seg']
+        ipe_coberto_por_log[cod2]['lct'] += cruz['ipe_cruz_lct']
+        ipe_coberto_por_log[cod2]['com'] += cruz['ipe_cruz_com']
+        ipe_coberto_por_log[cod2]['mob'] += cruz['ipe_cruz_mob']
+    
+    ipe_ajustado_total = 0
+    ipe_ajustado_seg = 0
+    ipe_ajustado_lct = 0
+    ipe_ajustado_com = 0
+    ipe_ajustado_mob = 0
+    
+    ipe_total_geral = sum(v['total'] for v in ipe_total_por_log.values())
+    ipe_total_seg = sum(v['seg'] for v in ipe_total_por_log.values())
+    ipe_total_lct = sum(v['lct'] for v in ipe_total_por_log.values())
+    ipe_total_com = sum(v['com'] for v in ipe_total_por_log.values())
+    ipe_total_mob = sum(v['mob'] for v in ipe_total_por_log.values())
+    
+    detalhes = []
+    logradouros_100 = 0
+    
+    for cod_log, ipe_total_dict in ipe_total_por_log.items():
+        ipe_total = ipe_total_dict['total']
+        ipe_coberto = ipe_coberto_por_log.get(cod_log, {'total': 0})['total']
+        
+        if ipe_total > 0:
+            cobertura_efetiva = ipe_coberto / ipe_total
+            
+            if cobertura_efetiva >= 0.15:
+                ipe_ajustado_total += ipe_total_dict['total']
+                ipe_ajustado_seg += ipe_total_dict['seg']
+                ipe_ajustado_lct += ipe_total_dict['lct']
+                ipe_ajustado_com += ipe_total_dict['com']
+                ipe_ajustado_mob += ipe_total_dict['mob']
+                cobertura_final = 1.0
+                logradouros_100 += 1
+            else:
+                ipe_ajustado_total += ipe_coberto
+                ipe_ajustado_seg += ipe_coberto_por_log.get(cod_log, {}).get('seg', 0)
+                ipe_ajustado_lct += ipe_coberto_por_log.get(cod_log, {}).get('lct', 0)
+                ipe_ajustado_com += ipe_coberto_por_log.get(cod_log, {}).get('com', 0)
+                ipe_ajustado_mob += ipe_coberto_por_log.get(cod_log, {}).get('mob', 0)
+                cobertura_final = cobertura_efetiva
+            
+            nome_log = logs_dict.get(cod_log, {}).get('nome', f'Log {cod_log}')
+            detalhes.append({
+                'cod_log': cod_log,
+                'nome': nome_log,
+                'cobertura_efetiva': cobertura_efetiva,
+                'cobertura_ajustada': cobertura_final,
+                'ipe_total': ipe_total
+            })
+    
+    cobertura_ajustada_total = (ipe_ajustado_total / ipe_total_geral * 100) if ipe_total_geral > 0 else 0
+    cobertura_ajustada_seg = (ipe_ajustado_seg / ipe_total_seg * 100) if ipe_total_seg > 0 else 0
+    cobertura_ajustada_lct = (ipe_ajustado_lct / ipe_total_lct * 100) if ipe_total_lct > 0 else 0
+    cobertura_ajustada_com = (ipe_ajustado_com / ipe_total_com * 100) if ipe_total_com > 0 else 0
+    cobertura_ajustada_mob = (ipe_ajustado_mob / ipe_total_mob * 100) if ipe_total_mob > 0 else 0
+    
+    dict_por_eixo = {
+        'seg': cobertura_ajustada_seg,
+        'lct': cobertura_ajustada_lct,
+        'com': cobertura_ajustada_com,
+        'mob': cobertura_ajustada_mob,
+        'qtd_100': logradouros_100,
+        'total_logs': len(ipe_total_por_log)
+    }
+    
+    detalhes.sort(key=lambda x: x['cobertura_efetiva'], reverse=True)
+    
+    return cobertura_ajustada_total, dict_por_eixo, detalhes
+
+
+def verificar_equipamentos_proximos(df_selecionados: pd.DataFrame, df_equipamentos: pd.DataFrame, 
+                                     raio_metros: float, nota_min: int, eixos: list) -> list:
+    """Verifica quais equipamentos estão próximos aos cruzamentos selecionados"""
+    if df_selecionados.empty or df_equipamentos.empty:
+        return []
+    
+    df_full = df_equipamentos.copy()
+    df_full['eixo_norm'] = df_full['eixo'].astype(str).str.strip().str.upper()
+    
+    if eixos:
+        df_equip = df_full[
+            (df_full['eixo_norm'].isin(eixos)) & 
+            (df_full['peso'] >= nota_min)
+        ].copy()
+    else:
+        df_equip = df_full[df_full['peso'] >= nota_min].copy()
+    
+    if df_equip.empty:
+        return []
+    
+    pontos_selecionados = []
+    for _, cruz in df_selecionados.iterrows():
+        pontos_selecionados.append((cruz['lat'], cruz['lon']))
+    
+    if len(pontos_selecionados) == 0:
+        return []
+    
+    equipamentos_encontrados = {}
+    
+    for _, equip in df_equip.iterrows():
+        equip_lat, equip_lon = equip['lat'], equip['lon']
+        equip_tipo = str(equip['tipo']).strip()
+        
+        if not equip_tipo or equip_tipo == '' or equip_tipo.lower() == 'nan':
+            equip_tipo = 'Equipamento Não Identificado'
+        
+        esta_proximo = False
+        for ponto_lat, ponto_lon in pontos_selecionados:
+            dist = distancia_metros(equip_lat, equip_lon, ponto_lat, ponto_lon)
+            if dist <= raio_metros:
+                esta_proximo = True
+                break
+        
+        if esta_proximo:
+            if equip_tipo not in equipamentos_encontrados:
+                equipamentos_encontrados[equip_tipo] = 0
+            equipamentos_encontrados[equip_tipo] += 1
+    
+    equipamentos_proximos = sorted(
+        equipamentos_encontrados.items(), 
+        key=lambda x: (-x[1], x[0])
+    )
+    
+    return equipamentos_proximos
+
+
+
+def carregar_excel_cruzamentos(filepath: Path) -> tuple:
     """Carrega e processa o Excel de cruzamentos"""
     try:
-        xls = pd.ExcelFile(file)
+        if not filepath.exists():
+            return None, None, f"Arquivo não encontrado: {filepath}"
+        
+        xls = pd.ExcelFile(filepath)
         
         if "MODELO" not in xls.sheet_names or "cruzamentos_100%" not in xls.sheet_names:
             return None, None, "Abas 'MODELO' e 'cruzamentos_100%' não encontradas."
         
-        df_modelo = pd.read_excel(file, sheet_name="MODELO", header=None)
+        df_modelo = pd.read_excel(filepath, sheet_name="MODELO", header=None)
         
         idx_header = None
         for i, row in df_modelo.iterrows():
@@ -417,7 +465,7 @@ def carregar_excel_cruzamentos(file) -> tuple:
             'mob': pd.to_numeric(df_logs.iloc[:, 6], errors='coerce').fillna(0)
         }).dropna(subset=['cod_log'])
         
-        df_cruz = pd.read_excel(file, sheet_name="cruzamentos_100%", header=0)
+        df_cruz = pd.read_excel(filepath, sheet_name="cruzamentos_100%", header=0)
         
         cruz_dict = {}
         id_counter = 1
@@ -457,10 +505,13 @@ def carregar_excel_cruzamentos(file) -> tuple:
         return None, None, f"Erro: {str(e)}"
 
 
-def carregar_excel_equipamentos(file) -> tuple:
+def carregar_excel_equipamentos(filepath: Path) -> tuple:
     """Carrega o Excel de equipamentos"""
     try:
-        df = pd.read_excel(file, header=0)
+        if not filepath.exists():
+            return None, f"Arquivo não encontrado: {filepath}"
+        
+        df = pd.read_excel(filepath, header=0)
         cols_necessarias = ["LATITUDE COM PONTO", "LONGITUDE COM PONTO", "PESO"]
         for col in cols_necessarias:
             if col not in df.columns:
@@ -478,6 +529,165 @@ def carregar_excel_equipamentos(file) -> tuple:
         return equip, f"✓ {len(equip)} equipamentos"
     except Exception as e:
         return None, f"Erro: {str(e)}"
+
+
+def carregar_pontos_minimos(filepath: Path) -> tuple:
+    """Carrega o Excel de pontos mínimos obrigatórios"""
+    try:
+        if not filepath.exists():
+            return None, f"Arquivo não encontrado: {filepath}"
+        
+        df = pd.read_excel(filepath, header=0)
+        
+        col_map = {}
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            if 'tipo' in col_lower:
+                col_map['tipo'] = col
+            elif 'logradouro' in col_lower or 'log' in col_lower:
+                col_map['logradouro'] = col
+            elif 'lat' in col_lower:
+                col_map['lat'] = col
+            elif 'lon' in col_lower or 'lng' in col_lower:
+                col_map['lon'] = col
+            elif 'prioridade' in col_lower or 'peso' in col_lower:
+                col_map['prioridade'] = col
+            elif 'camera' in col_lower or 'câmera' in col_lower:
+                col_map['cameras'] = col
+        
+        if 'lat' not in col_map or 'lon' not in col_map:
+            return None, "Colunas 'latitude' e 'longitude' são obrigatórias."
+        
+        pontos = pd.DataFrame({
+            'id_minimo': range(1, len(df) + 1),
+            'tipo': df[col_map.get('tipo', df.columns[0])].astype(str) if 'tipo' in col_map else 'PONTO_MINIMO',
+            'logradouro': df[col_map.get('logradouro', df.columns[0])].astype(str) if 'logradouro' in col_map else '',
+            'lat': pd.to_numeric(df[col_map['lat']], errors='coerce'),
+            'lon': pd.to_numeric(df[col_map['lon']], errors='coerce'),
+            'prioridade': pd.to_numeric(df[col_map.get('prioridade', df.columns[0])], errors='coerce').fillna(5) if 'prioridade' in col_map else 5,
+            'cameras': pd.to_numeric(df[col_map.get('cameras', df.columns[0])], errors='coerce').fillna(1).astype(int) if 'cameras' in col_map else 1
+        }).dropna(subset=['lat', 'lon'])
+        
+        pontos = pontos.sort_values('prioridade', ascending=True).reset_index(drop=True)
+        
+        return pontos, f"✓ {len(pontos)} pontos mínimos carregados"
+    except Exception as e:
+        return None, f"Erro: {str(e)}"
+
+
+def carregar_alagamentos(filepath: Path) -> tuple:
+    """Carrega o Excel de pontos de alagamento"""
+    try:
+        if not filepath.exists():
+            return None, f"Arquivo não encontrado: {filepath}"
+        
+        df = pd.read_excel(filepath, header=0)
+        
+        col_map = {}
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            if 'nome' in col_lower or 'descricao' in col_lower or 'descrição' in col_lower:
+                col_map['nome'] = col
+            elif 'lat' in col_lower:
+                col_map['lat'] = col
+            elif 'lon' in col_lower or 'lng' in col_lower:
+                col_map['lon'] = col
+            elif 'id' in col_lower:
+                col_map['id'] = col
+        
+        if 'lat' not in col_map or 'lon' not in col_map:
+            return None, "Colunas 'latitude' e 'longitude' são obrigatórias."
+        
+        alagamentos = pd.DataFrame({
+            'id': df[col_map['id']].astype(str) if 'id' in col_map else range(1, len(df) + 1),
+            'nome': df[col_map.get('nome', df.columns[0])].astype(str) if 'nome' in col_map else [f"Alagamento {i+1}" for i in range(len(df))],
+            'lat': pd.to_numeric(df[col_map['lat']], errors='coerce'),
+            'lon': pd.to_numeric(df[col_map['lon']], errors='coerce')
+        }).dropna(subset=['lat', 'lon'])
+        
+        return alagamentos, f"✓ {len(alagamentos)} pontos de alagamento carregados"
+    except Exception as e:
+        return None, f"Erro: {str(e)}"
+
+
+def carregar_sinistros(filepath: Path) -> tuple:
+    """Carrega o Excel de sinistros por logradouro"""
+    try:
+        if not filepath.exists():
+            return None, f"Arquivo não encontrado: {filepath}"
+        
+        df = pd.read_excel(filepath, header=0)
+        
+        col_map = {}
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            if 'logradouro' in col_lower or 'log' in col_lower or 'rua' in col_lower:
+                col_map['logradouro'] = col
+            elif 'qtd' in col_lower or 'quantidade' in col_lower or 'total' in col_lower:
+                col_map['qtd'] = col
+            elif 'id' in col_lower:
+                col_map['id'] = col
+        
+        if 'logradouro' not in col_map:
+            return None, "Coluna 'LOGRADOURO' é obrigatória."
+        
+        sinistros = pd.DataFrame({
+            'id': df[col_map['id']].astype(str) if 'id' in col_map else df[col_map['logradouro']].astype(str),
+            'logradouro': df[col_map['logradouro']].astype(str),
+            'qtd': pd.to_numeric(df[col_map.get('qtd', df.columns[0])], errors='coerce').fillna(1).astype(int) if 'qtd' in col_map else 1
+        })
+        
+        sinistros['logradouro'] = sinistros['logradouro'].str.strip().str.upper()
+        
+        return sinistros, f"✓ {len(sinistros)} logradouros com sinistros carregados"
+    except Exception as e:
+        return None, f"Erro: {str(e)}"
+
+
+def carregar_bairros_geojson(filepath: Path) -> tuple:
+    """Carrega o arquivo GeoJSON de bairros"""
+    try:
+        if not filepath.exists():
+            return None, f"Arquivo não encontrado: {filepath}"
+        
+        with open(filepath, 'r', encoding='utf-8') as f:
+            geojson_data = json.load(f)
+        
+        return geojson_data, "✓ Fronteira carregada"
+    except Exception as e:
+        return None, f"Erro: {str(e)}"
+
+
+def carregar_arquivos_locais():
+    """Carrega todos os arquivos locais na inicialização"""
+    logs, cruzamentos, msg = carregar_excel_cruzamentos(ARQUIVO_CRUZAMENTOS)
+    if logs is not None:
+        st.session_state.logs = logs
+        st.session_state.cruzamentos = cruzamentos
+    
+    pontos_min, msg = carregar_pontos_minimos(ARQUIVO_PRIORIDADES)
+    if pontos_min is not None:
+        st.session_state.pontos_minimos = pontos_min
+    
+    equip, msg = carregar_excel_equipamentos(ARQUIVO_EQUIPAMENTOS)
+    if equip is not None:
+        st.session_state.equipamentos = equip
+    
+    alag, msg = carregar_alagamentos(ARQUIVO_ALAGAMENTOS)
+    if alag is not None:
+        st.session_state.alagamentos = alag
+    
+    sinist, msg = carregar_sinistros(ARQUIVO_SINISTROS)
+    if sinist is not None:
+        st.session_state.sinistros = sinist
+    
+    if ARQUIVO_BAIRROS.exists():
+        geojson_data, msg = carregar_bairros_geojson(ARQUIVO_BAIRROS)
+        if geojson_data is not None:
+            st.session_state.bairros_geojson = geojson_data
+    
+    st.session_state.arquivos_carregados = True
+
 
 
 def calcular_ipe_cruzamentos(logs: pd.DataFrame, cruzamentos: pd.DataFrame, 
@@ -511,8 +721,7 @@ def calcular_ipe_cruzamentos(logs: pd.DataFrame, cruzamentos: pd.DataFrame,
             'ipe_log1': ipe1, 'ipe_log2': ipe2, 'ipe_cruz': ipe_cruz,
             'seg_tot': seg_tot, 'lct_tot': lct_tot, 'com_tot': com_tot, 'mob_tot': mob_tot,
             'ipe_cruz_seg': w_seg * seg_tot, 'ipe_cruz_lct': w_lct * lct_tot,
-            'ipe_cruz_com': w_com * com_tot, 'ipe_cruz_mob': w_mob * mob_tot,
-            'camera_tipo': sugerir_tipo_camera(seg_tot, lct_tot, com_tot, mob_tot)
+            'ipe_cruz_com': w_com * com_tot, 'ipe_cruz_mob': w_mob * mob_tot
         })
     
     if not resultados:
@@ -531,30 +740,22 @@ def calcular_ipe_cruzamentos(logs: pd.DataFrame, cruzamentos: pd.DataFrame,
     return df
 
 
+
 def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, min_dist: float, 
                                        max_cruzamentos: int = None, raio_cobertura: float = 50,
-                                       limite_cobertura_logradouro: float = None) -> tuple:
-    """
-    Filtra cruzamentos mantendo a cobertura alvo mesmo com filtro de distância.
+                                       limite_cobertura_logradouro: float = None,
+                                       pontos_minimos: pd.DataFrame = None,
+                                       max_cameras: int = None) -> tuple:
     
-    Args:
-        df: DataFrame com cruzamentos ordenados por IPE
-        cobertura_frac: Fração de cobertura alvo (0-1)
-        min_dist: Distância mínima entre cruzamentos DO MESMO LOGRADOURO em metros
-        max_cruzamentos: Limite máximo de cruzamentos (None = sem limite)
-        raio_cobertura: Raio de cobertura de cada câmera NO MESMO LOGRADOURO em metros
-        limite_cobertura_logradouro: Fração máxima de cobertura por logradouro (0-1, None = sem limite)
+    df_pontos_minimos_usados = pd.DataFrame()
     
-    Retorna: (DataFrame selecionados, cobertura_real, alvo_atingido, motivo_limite, ids_cobertos)
-    """
     if df.empty:
-        return pd.DataFrame(), 0.0, True, None, set()
+        return pd.DataFrame(), 0.0, True, None, set(), df_pontos_minimos_usados, 0
     
     ipe_total = df['ipe_cruz'].sum()
     if ipe_total <= 0:
-        return pd.DataFrame(), 0.0, True, None, set()
+        return pd.DataFrame(), 0.0, True, None, set(), df_pontos_minimos_usados, 0
     
-    # Calcular IPE total por logradouro (para limite de cobertura por rua)
     ipe_por_logradouro = {}
     if limite_cobertura_logradouro is not None:
         for _, c in df.iterrows():
@@ -562,10 +763,7 @@ def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, m
             for cod_log in [c['cod_log1'], c['cod_log2']]:
                 ipe_por_logradouro[cod_log] = ipe_por_logradouro.get(cod_log, 0) + ipe
     
-    # Rastrear cobertura acumulada por logradouro
     cobertura_por_logradouro = {}
-    
-    # Pré-indexar cruzamentos por logradouro
     cruzamentos_por_logradouro = {}
     cruz_por_id = {}
     
@@ -585,7 +783,16 @@ def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, m
                 cruzamentos_por_logradouro[cod_log] = []
             cruzamentos_por_logradouro[cod_log].append((cruz_id, lat, lon, ipe))
     
+    cameras_globais = []
     cameras_por_logradouro = {}
+    
+    def camera_muito_perto_global(lat, lon):
+        if min_dist <= 0:
+            return False
+        for cam_lat, cam_lon in cameras_globais:
+            if distancia_metros(lat, lon, cam_lat, cam_lon) < min_dist:
+                return True
+        return False
     
     def camera_muito_perto_no_logradouro(lat, lon, cod_log1, cod_log2):
         if min_dist <= 0:
@@ -596,6 +803,9 @@ def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, m
                     if distancia_metros(lat, lon, cam_lat, cam_lon) < min_dist:
                         return True
         return False
+    
+    def registrar_camera_global(lat, lon):
+        cameras_globais.append((lat, lon))
     
     def registrar_camera_nos_logradouros(lat, lon, cod_log1, cod_log2):
         for cod_log in [cod_log1, cod_log2]:
@@ -669,23 +879,77 @@ def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, m
                 cobertura_por_logradouro[cob_log2] = cobertura_por_logradouro.get(cob_log2, 0) + cob_ipe
                 processados.add(cob_id)
     
+    def calcular_cameras_por_ponto(indice_ponto: int) -> int:
+        posicao_percent = (indice_ponto % 100)
+        if posicao_percent < 50:
+            return 3
+        elif posicao_percent < 80:
+            return 2
+        else:
+            return 1
+    
     selecionados = []
     ids_cobertos = set()
     ipe_coberto = 0.0
     motivo_limite = None
+    total_cameras = 0
+    total_pontos = 0
+    pontos_minimos_usados = []
+    
+    if pontos_minimos is not None and not pontos_minimos.empty:
+        for _, ponto in pontos_minimos.iterrows():
+            cameras_deste_ponto = int(ponto.get('cameras', 1))
+            
+            if max_cameras is not None and (total_cameras + cameras_deste_ponto) > max_cameras:
+                motivo_limite = 'cameras'
+                break
+            
+            lat, lon = ponto['lat'], ponto['lon']
+            
+            registrar_camera_global(lat, lon)
+            total_cameras += cameras_deste_ponto
+            total_pontos += 1
+            
+            pontos_minimos_usados.append({
+                'id_minimo': ponto.get('id_minimo', len(pontos_minimos_usados) + 1),
+                'tipo': ponto.get('tipo', 'PONTO_MINIMO'),
+                'logradouro': ponto.get('logradouro', ''),
+                'lat': lat,
+                'lon': lon,
+                'prioridade': ponto.get('prioridade', 5),
+                'cameras': cameras_deste_ponto,
+                'is_ponto_minimo': True
+            })
+            
+            for cruz_id, info in cruz_por_id.items():
+                if cruz_id not in ids_cobertos:
+                    if distancia_metros(lat, lon, info['lat'], info['lon']) <= raio_cobertura:
+                        ids_cobertos.add(cruz_id)
+                        ipe_coberto += info['ipe']
+        
+        df_pontos_minimos_usados = pd.DataFrame(pontos_minimos_usados) if pontos_minimos_usados else pd.DataFrame()
     
     for _, c in df.iterrows():
+        cameras_deste_ponto = calcular_cameras_por_ponto(total_pontos)
+        
+        if max_cameras is not None and (total_cameras + cameras_deste_ponto) > max_cameras:
+            motivo_limite = 'cameras'
+            break
+        
         if max_cruzamentos is not None and len(selecionados) >= max_cruzamentos:
             motivo_limite = 'quantidade'
             break
         
         cobertura_atual = ipe_coberto / ipe_total
-        if max_cruzamentos is None and cobertura_atual >= cobertura_frac:
+        if max_cruzamentos is None and max_cameras is None and cobertura_atual >= cobertura_frac:
             break
         
         lat, lon = c['lat'], c['lon']
         cruz_id = c['id']
         cod_log1, cod_log2 = c['cod_log1'], c['cod_log2']
+        
+        if camera_muito_perto_global(lat, lon):
+            continue
         
         if camera_muito_perto_no_logradouro(lat, lon, cod_log1, cod_log2):
             continue
@@ -697,32 +961,44 @@ def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, m
         if violaria_limite_logradouro(cruz_id, novos_cobertos, cod_log1, cod_log2):
             continue
         
-        selecionados.append(c.to_dict())
+        cruz_dict = c.to_dict()
+        cruz_dict['cameras'] = cameras_deste_ponto
+        selecionados.append(cruz_dict)
+        
+        registrar_camera_global(lat, lon)
         registrar_camera_nos_logradouros(lat, lon, cod_log1, cod_log2)
         atualizar_cobertura_logradouros(cruz_id, novos_cobertos, cod_log1, cod_log2)
+        total_cameras += cameras_deste_ponto
+        total_pontos += 1
         
         for cob_id in novos_cobertos:
             if cob_id in cruz_por_id and cob_id not in ids_cobertos:
                 ipe_coberto += cruz_por_id[cob_id]['ipe']
         ids_cobertos.update(novos_cobertos)
     
-    if not selecionados:
-        return pd.DataFrame(), 0.0, False, None, set()
+    if not selecionados and df_pontos_minimos_usados.empty:
+        return pd.DataFrame(), 0.0, False, None, set(), df_pontos_minimos_usados, 0
     
-    df_result = pd.DataFrame(selecionados)
+    df_result = pd.DataFrame(selecionados) if selecionados else pd.DataFrame()
     cobertura_real = ipe_coberto / ipe_total
-    df_result['cobertura_acum'] = df_result['ipe_cruz'].cumsum() / ipe_total
+    
+    if not df_result.empty:
+        df_result['cobertura_acum'] = df_result['ipe_cruz'].cumsum() / ipe_total
     
     alvo_atingido = cobertura_real >= cobertura_frac * 0.99
     if not alvo_atingido and motivo_limite is None:
         motivo_limite = 'restricoes'
     
-    return df_result, cobertura_real, alvo_atingido, motivo_limite, ids_cobertos
+    return df_result, cobertura_real, alvo_atingido, motivo_limite, ids_cobertos, df_pontos_minimos_usados, total_cameras
 
 
+
+# ===== AJUSTE 3: FUNÇÃO criar_mapa SIMPLIFICADA =====
 def criar_mapa(cruzamentos_selecionados: pd.DataFrame, equipamentos: pd.DataFrame, 
-               nota_min_equip: int, bairros_geojson=None) -> folium.Map:
-    """Cria o mapa com os cruzamentos e equipamentos"""
+               nota_min_equip: int, bairros_geojson=None,
+               pontos_minimos_usados: pd.DataFrame = None, mostrar_pontos_minimos: bool = True,
+               mostrar_pontos_ipe: bool = True) -> folium.Map:
+    """Cria o mapa com os cruzamentos, equipamentos e pontos mínimos"""
     m = folium.Map(location=[-8.05, -34.91], zoom_start=12, tiles='OpenStreetMap')
     
     if bairros_geojson is not None:
@@ -730,35 +1006,38 @@ def criar_mapa(cruzamentos_selecionados: pd.DataFrame, equipamentos: pd.DataFram
             'fillColor': 'transparent', 'color': '#6b7280', 'weight': 2, 'fillOpacity': 0
         }).add_to(m)
     
-    if not cruzamentos_selecionados.empty:
+    # Pontos Mínimos
+    if mostrar_pontos_minimos and pontos_minimos_usados is not None and not pontos_minimos_usados.empty:
+        for _, p in pontos_minimos_usados.iterrows():
+            popup_html = f"""<div style="font-size:0.8rem; min-width:180px;">
+                <strong>📍 PONTO OBRIGATÓRIO</strong><br/>
+                <b>Tipo:</b> {p.get('tipo', 'N/A')}<br/>
+                <b>Logradouro:</b> {p.get('logradouro', 'N/A')}<br/>
+                <b>Prioridade:</b> {p.get('prioridade', 'N/A')}
+            </div>"""
+            folium.CircleMarker(
+                location=[p['lat'], p['lon']], radius=5, color="#f6443b",
+                fill=True, fillColor="#f6443b", fillOpacity=0.8, weight=2,
+                popup=folium.Popup(popup_html, max_width=250)
+            ).add_to(m)
+    
+    # Pontos via IPE
+    if mostrar_pontos_ipe and not cruzamentos_selecionados.empty:
         for _, c in cruzamentos_selecionados.iterrows():
-            tipo = c.get('camera_tipo', 'FIXA')
             popup_html = f"""<div style="font-size:0.8rem; min-width:180px;">
                 <strong>Cruzamento {int(c['id'])}</strong><br/>
                 <b>Ruas:</b> {c['log1']} x {c['log2']}<br/>
-                <b>Camera:</b> {tipo}<br/>
                 <b>IPE:</b> {c['ipe_cruz']:.4f}<br/>
                 <b>Cobertura:</b> {c['cobertura_acum']*100:.2f}%
             </div>"""
             folium.CircleMarker(
                 location=[c['lat'], c['lon']], radius=5, color="#3b82f6",
-                fill=True, fillColor="#3b82f6", fillOpacity=0.85, weight=1,
+                fill=True, fillColor="#3b82f6", fillOpacity=0.8, weight=1,
                 popup=folium.Popup(popup_html, max_width=250)
             ).add_to(m)
     
-    if not equipamentos.empty:
-        for _, e in equipamentos[equipamentos['peso'] >= nota_min_equip].iterrows():
-            popup_html = f"""<div style="font-size:0.8rem;">
-                <strong>{e['tipo'] or 'Equipamento'}</strong><br/>
-                <b>Log:</b> {e['log']}<br/><b>Peso:</b> {e['peso']}
-            </div>"""
-            folium.CircleMarker(
-                location=[e['lat'], e['lon']], radius=5, color="#dc2626",
-                fill=True, fillColor="#ef4444", fillOpacity=0.85, weight=1,
-                popup=folium.Popup(popup_html, max_width=200)
-            ).add_to(m)
-    
     return m
+# ===== FIM AJUSTE 3 =====
 
 
 def gerar_csv_download(df_calculados: pd.DataFrame, df_selecionados: pd.DataFrame) -> bytes:
@@ -771,8 +1050,7 @@ def gerar_csv_download(df_calculados: pd.DataFrame, df_selecionados: pd.DataFram
     df_export['selecionado_no_mapa'] = df_export['id'].apply(lambda x: 1 if x in ids_sel else 0)
     
     cols = ['id', 'cod_log1', 'log1', 'cod_log2', 'log2', 'lat', 'lon',
-            'ipe_log1', 'ipe_log2', 'ipe_cruz', 'perc_ipe', 'cobertura_acum',
-            'camera_tipo', 'selecionado_no_mapa']
+            'ipe_log1', 'ipe_log2', 'ipe_cruz', 'perc_ipe', 'cobertura_acum', 'selecionado_no_mapa']
     
     df_export = df_export[cols]
     for col in ['ipe_log1', 'ipe_log2', 'ipe_cruz', 'perc_ipe', 'cobertura_acum']:
@@ -781,107 +1059,111 @@ def gerar_csv_download(df_calculados: pd.DataFrame, df_selecionados: pd.DataFram
     return df_export.to_csv(index=False, sep=';').encode('utf-8')
 
 
-def gerar_estatisticas_equipamentos(df_equipamentos: pd.DataFrame, nota_min: int) -> dict:
-    """Gera estatísticas detalhadas dos equipamentos"""
-    if df_equipamentos.empty:
-        return None
-    
-    df_eq = df_equipamentos[df_equipamentos['peso'] >= nota_min].copy()
-    total_filtrado = len(df_eq)
-    
-    if total_filtrado == 0:
-        return {'total': 0, 'tipos': {}, 'agrupados': {}, 'prioridades': {}}
-    
-    # Tratamentos
-    df_eq['primeira_palavra'] = df_eq['tipo'].astype(str).apply(
-        lambda x: x.split(' ')[0] if len(x) > 0 else "Outros"
-    )
-    
-    mapa_semelhantes = {
-        "2ª": "2ª Jardim", "Primeira": "Parque", "Maria": "Rua", "Skate,": "Skatepark",
-        "3ª": "3ª Jardim", "1º": "1ª Jardim", "Administração": "Pátio", "AVENIDA": "AVENIDA",
-        "CAIXA": "Caixa Cultural", "Casa": "Casa dos Patrimônios", "Novo": "Skatepark",
-        "ANTIGO": "Hotel", "CASA": "Casa da Cultura", "BURACO": "Praia", "POLO": "Polo",
-        "Numa": "Rua", "PARQUE": "Parque"
-    }
-    df_eq['agrupado'] = df_eq['primeira_palavra'].apply(lambda x: mapa_semelhantes.get(x, x))
-    
-    contagem_tipos = df_eq['tipo'].value_counts().to_dict()
-    contagem_agrupada = df_eq['agrupado'].value_counts().to_dict()
-    contagem_pesos = df_eq['peso'].value_counts().sort_index(ascending=False).to_dict()
-    
-    return {
-        'total': total_filtrado,
-        'tipos': contagem_tipos,
-        'agrupados': contagem_agrupada,
-        'prioridades': contagem_pesos
-    }
+# ============================================================
+# CARREGAMENTO INICIAL DOS ARQUIVOS
+# ============================================================
+if not st.session_state.arquivos_carregados:
+    carregar_arquivos_locais()
+
 
 
 # ============================================================
-# SIDEBAR - CONTROLES
+# SIDEBAR - CONTROLES COM AJUSTES 1 E 2
 # ============================================================
 with st.sidebar:
     st.markdown("## 🎛️ Controles")
     
-    # 1. Excel de cruzamentos
-    st.markdown('<div class="section-title">1a. Excel de cruzamentos</div>', unsafe_allow_html=True)
-    file_cruz = st.file_uploader("Cruzamentos", type=['xlsx', 'xls'], key='file_cruz', label_visibility='collapsed')
-    if file_cruz:
-        logs, cruzamentos, msg = carregar_excel_cruzamentos(file_cruz)
-        if logs is not None:
-            st.session_state.logs = logs
-            st.session_state.cruzamentos = cruzamentos
-            st.success(msg)
-        else:
-            st.error(msg)
+    st.markdown('<div class="section-title">📁 Status dos Arquivos</div>', unsafe_allow_html=True)
     
-    # 1b. Excel de equipamentos
-    st.markdown('<div class="section-title">1b. Excel de equipamentos</div>', unsafe_allow_html=True)
-    file_equip = st.file_uploader("Equipamentos", type=['xlsx', 'xls'], key='file_equip', label_visibility='collapsed')
-    if file_equip:
-        equip, msg = carregar_excel_equipamentos(file_equip)
-        if equip is not None:
-            st.session_state.equipamentos = equip
-            st.success(msg)
-        else:
-            st.error(msg)
+    status_html = '<div class="stat-box">'
+    if not st.session_state.logs.empty:
+        status_html += f'<div class="stat-row"><span>✓ Cruzamentos:</span><span class="stat-value">{len(st.session_state.cruzamentos)}</span></div>'
+    else:
+        status_html += '<div class="stat-row"><span>✗ Cruzamentos:</span><span style="color:#ef4444;">Não carregado</span></div>'
     
+    if not st.session_state.pontos_minimos.empty:
+        status_html += f'<div class="stat-row"><span>✓ Prioridades:</span><span class="stat-value">{len(st.session_state.pontos_minimos)}</span></div>'
+    else:
+        status_html += '<div class="stat-row"><span>✗ Prioridades:</span><span style="color:#ef4444;">Não carregado</span></div>'
+    
+    if not st.session_state.equipamentos.empty:
+        status_html += f'<div class="stat-row"><span>✓ Equipamentos:</span><span class="stat-value">{len(st.session_state.equipamentos)}</span></div>'
+    else:
+        status_html += '<div class="stat-row"><span>✗ Equipamentos:</span><span style="color:#ef4444;">Não carregado</span></div>'
+    
+    if not st.session_state.alagamentos.empty:
+        status_html += f'<div class="stat-row"><span>✓ Alagamentos:</span><span class="stat-value">{len(st.session_state.alagamentos)}</span></div>'
+    else:
+        status_html += '<div class="stat-row"><span>✗ Alagamentos:</span><span style="color:#ef4444;">Não carregado</span></div>'
+    
+    if not st.session_state.sinistros.empty:
+        total_sinistros_carregados = st.session_state.sinistros['qtd'].sum()
+        status_html += f'<div class="stat-row"><span>✓ Sinistros:</span><span class="stat-value">{total_sinistros_carregados} em {len(st.session_state.sinistros)} ruas</span></div>'
+    else:
+        status_html += '<div class="stat-row"><span>✗ Sinistros:</span><span style="color:#ef4444;">Não carregado</span></div>'
+    
+    if st.session_state.bairros_geojson is not None:
+        status_html += '<div class="stat-row"><span>✓ Bairros:</span><span class="stat-value">Carregado</span></div>'
+    
+    status_html += '</div>'
+    st.markdown(status_html, unsafe_allow_html=True)
+    
+    if st.button("🔄 Recarregar Arquivos", use_container_width=True):
+        st.session_state.arquivos_carregados = False
+        st.rerun()
+    
+    st.markdown("---")
+
     nota_min_equip = st.slider("Nota minima equipamentos", 1, 5, 4, key='nota_equip')
     
-    # 1c. GeoJSON
-    st.markdown('<div class="section-title">1c. Bairros (GeoJSON)</div>', unsafe_allow_html=True)
-    file_bairros = st.file_uploader("GeoJSON", type=['json', 'geojson'], key='file_bairros', label_visibility='collapsed')
-    if file_bairros:
-        try:
-            st.session_state.bairros_geojson = json.load(file_bairros)
-            st.success("✓ Fronteira carregada")
-        except Exception as e:
-            st.error(f"Erro: {str(e)}")
+    # ===== AJUSTE 1 E 2: FILTROS DE COBERTURA E LIMITE DE CÂMERAS =====
+    st.markdown('<div class="section-title">2. Limite de Otimização</div>', unsafe_allow_html=True)
     
-    # 2. Cobertura
-    st.markdown('<div class="section-title">2a. Alvo de Cobertura IPE</div>', unsafe_allow_html=True)
-    cobertura_pct = st.slider("Cobertura (%)", 5, 100, 40, key='cobertura')
+    modo_limite = st.radio(
+        "Escolha o modo de limite:",
+        ["Quantidade de Câmeras","Cobertura Alvo (%)"],
+        key='modo_limite',
+        help="Cobertura Alvo: otimiza até atingir % de cobertura desejada. Quantidade: limita o número total de câmeras."
+    )
     
-    # 2b. Quantidade maxima
-    st.markdown('<div class="section-title">2b. Quantidade maxima de pontos (opcional)</div>', unsafe_allow_html=True)
-    usar_limite_qtd = st.checkbox("Limitar quantidade de pontos", value=False, key='usar_limite_qtd')
-    if usar_limite_qtd:
-        max_cruzamentos = st.number_input("Maximo de pontos", min_value=1, max_value=5000, value=100, step=10, key='max_cruz',
-                                          help="Quando definido, o sistema usa TODOS os pontos ate este limite")
+    if modo_limite == "Cobertura Alvo (%)":
+        # AJUSTE 1: Filtro de Cobertura Alvo Efetiva IPE
+        cobertura_pct = st.slider(
+            "Cobertura alvo efetiva IPE (%)", 
+            50, 80, 80, step=5, 
+            key='cobertura_alvo',
+            help="Percentual de cobertura efetiva do IPE a ser atingido"
+        )
+        max_cameras = None
+        st.markdown(f'''<div class="info-box">
+            ℹ️ O otimizador buscará atingir <b>{cobertura_pct}%</b> de cobertura efetiva
+        </div>''', unsafe_allow_html=True)
     else:
-        max_cruzamentos = None
+        # AJUSTE 2: Limite Mínimo de 250 Câmeras
+        cobertura_pct = 100
+        max_cameras = st.number_input(
+            "Máximo de câmeras", 
+            min_value=250,  # ← AJUSTE 2: LIMITE MÍNIMO
+            max_value=3000, 
+            value=500, 
+            step=10, 
+            key='max_cameras',
+            help="Limite total de câmeras no sistema (50% dos pontos = 3 câm, 30% = 2 câm, 20% = 1 câm). Mínimo: 250 câmeras"
+        )
+        st.markdown(f'''<div class="info-box">
+            ℹ️ Limite fixo de <b>{max_cameras}</b> câmeras (distribuição: 50% com 3 câm, 30% com 2 câm, 20% com 1 câm)
+        </div>''', unsafe_allow_html=True)
     
-    # 3. Distancia minima
+    max_cruzamentos = None
+    # ===== FIM AJUSTE 1 E 2 =====
+    
     st.markdown('<div class="section-title">3a. Distancia minima entre câmeras</div>', unsafe_allow_html=True)
-    dist_min = st.slider("Distancia (m)", 0, 1000, 150, step=50, key='dist_min', help="Distancia minima entre câmeras que compartilham o mesmo logradouro")
+    dist_min = st.slider("Distancia (m)", 50, 500, 300, step=50, key='dist_min', help="Distancia minima entre câmeras que compartilham o mesmo logradouro")
     
-    # 3b. Raio de cobertura
     st.markdown('<div class="section-title">3b. Raio de cobertura das cameras</div>', unsafe_allow_html=True)
-    raio_cobertura = st.slider("Raio (m)",0, 200, 50, step=10, key='raio_cobertura')
+    raio_cobertura = st.slider("Raio (m)",50, 250, 50, step=50, key='raio_cobertura')
     
-    # 3c. Limite de cobertura por logradouro
-    st.markdown('<div class="section-title">4a. Limite de cobertura por logradouro</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">4. Limite de cobertura por logradouro</div>', unsafe_allow_html=True)
     usar_limite_log = st.checkbox("Limitar cobertura por rua", value=False, key='usar_limite_log',
                                    help="Evita concentracao de cameras em uma unica rua")
     if usar_limite_log:
@@ -893,12 +1175,11 @@ with st.sidebar:
     else:
         limite_cob_log = None
     
-    # 5. Pesos
     st.markdown('<div class="section-title">5. Pesos dos eixos</div>', unsafe_allow_html=True)
-    peso_seg = st.slider("Seguranca", 0, 100, 50, key='peso_seg')
-    peso_lct = st.slider("LCT", 0, 100, 20, key='peso_lct')
+    peso_seg = st.slider("Seguranca", 0, 100, 15, key='peso_seg')
+    peso_lct = st.slider("LCT", 0, 100, 30, key='peso_lct')
     peso_com = st.slider("Comercial", 0, 100, 15, key='peso_com')
-    peso_mob = st.slider("Mobilidade", 0, 100, 15, key='peso_mob')
+    peso_mob = st.slider("Mobilidade", 0, 100, 40, key='peso_mob')
     
     soma_pesos = peso_seg + peso_lct + peso_com + peso_mob or 1
     w_seg, w_lct = peso_seg / soma_pesos, peso_lct / soma_pesos
@@ -910,6 +1191,7 @@ with st.sidebar:
         <span class="chip">Com {w_com*100:.0f}%</span>
         <span class="chip">Mob {w_mob*100:.0f}%</span>
     </div>""", unsafe_allow_html=True)
+
 
 
 # ============================================================
@@ -925,10 +1207,29 @@ if not st.session_state.logs.empty and not st.session_state.cruzamentos.empty:
         st.session_state.logs, st.session_state.cruzamentos, w_seg, w_lct, w_com, w_mob
     )
 
+df_pontos_minimos_usados = pd.DataFrame()
+total_cameras_usado = 0
+
 if not st.session_state.cruzamentos_calculados.empty:
-    st.session_state.ultimo_selecionados, cobertura_real, alvo_atingido, motivo_limite, ids_cobertos = filtrar_por_cobertura_e_distancia(
+    pontos_min_para_usar = st.session_state.pontos_minimos if not st.session_state.pontos_minimos.empty else None
+    
+    st.session_state.ultimo_selecionados, cobertura_real, alvo_atingido, motivo_limite, ids_cobertos, df_pontos_minimos_usados, total_cameras_usado = filtrar_por_cobertura_e_distancia(
         st.session_state.cruzamentos_calculados, cobertura_pct / 100, dist_min, 
-        max_cruzamentos, raio_cobertura, limite_cob_log
+        max_cruzamentos, raio_cobertura, limite_cob_log,
+        pontos_min_para_usar, max_cameras
+    )
+
+# ✅ ADICIONAR AQUI (após ids_cobertos ser calculado):
+# Calcular cobertura por logradouro ajustada
+cobertura_ajustada_total = 0.0
+cobertura_ajustada_eixos = {'seg': 0.0, 'lct': 0.0, 'com': 0.0, 'mob': 0.0, 'qtd_100': 0, 'total_logs': 0}
+detalhes_logradouros = []
+
+if not st.session_state.cruzamentos_calculados.empty and ids_cobertos:
+    cobertura_ajustada_total, cobertura_ajustada_eixos, detalhes_logradouros = calcular_cobertura_por_logradouro_ajustada(
+        st.session_state.cruzamentos_calculados,
+        ids_cobertos,
+        st.session_state.logs
     )
 
 # ============================================================
@@ -936,8 +1237,7 @@ if not st.session_state.cruzamentos_calculados.empty:
 # ============================================================
 st.markdown('<h1 class="main-header">Otimizador do Videomonitoramento - Recife</h1>', unsafe_allow_html=True)
 
-# Alerta se cobertura alvo nao foi atingida
-if not st.session_state.cruzamentos_calculados.empty and not alvo_atingido and max_cruzamentos is None:
+if not st.session_state.cruzamentos_calculados.empty and not alvo_atingido and max_cruzamentos is None and max_cameras is None:
     restricoes_ativas = []
     if dist_min > 0:
         restricoes_ativas.append(f"distancia minima de {dist_min}m")
@@ -945,28 +1245,43 @@ if not st.session_state.cruzamentos_calculados.empty and not alvo_atingido and m
         restricoes_ativas.append(f"limite de {limite_cob_log*100:.0f}% por logradouro")
     
     restricoes_texto = " e ".join(restricoes_ativas) if restricoes_ativas else "as restricoes configuradas"
-    
-    st.markdown(f"""<div class="coverage-warning">
-        ⚠️ <b>Exibindo cobertura maxima possivel:</b> {cobertura_real*100:.1f}% (alvo: {cobertura_pct}%)<br/>
-        <small>Com {restricoes_texto}, nao e possivel atingir {cobertura_pct}%. O mapa mostra o maximo atingivel.</small>
-    </div>""", unsafe_allow_html=True)
 
-# Layout: Mapa a esquerda, estatisticas a direita
 col_mapa, col_stats = st.columns([2, 1])
 
 with col_mapa:
+    # Preparar dados para o mapa com AJUSTE 3
     mapa = criar_mapa(
         st.session_state.ultimo_selecionados,
         st.session_state.equipamentos,
         nota_min_equip,
-        st.session_state.bairros_geojson
+        st.session_state.bairros_geojson,
+        df_pontos_minimos_usados,
+        st.session_state.mostrar_pontos_minimos,
+        st.session_state.mostrar_pontos_ipe
     )
     st_folium(mapa, width=None, height=520, returned_objects=[])
+    
+    # ===== AJUSTE 3: CHECKBOXES SIMPLIFICADOS ABAIXO DO MAPA =====
+    st.markdown("---")
+    col_check1, col_check2 = st.columns(2)
+    
+    with col_check1:
+        st.session_state.mostrar_pontos_minimos = st.checkbox(
+            "📍 Mostrar Pontos Mínimos", 
+            value=st.session_state.mostrar_pontos_minimos, 
+            key='check_pontos_min'
+        )
+    
+    with col_check2:
+        st.session_state.mostrar_pontos_ipe = st.checkbox(
+            "📊 Mostrar Pontos via IPE", 
+            value=st.session_state.mostrar_pontos_ipe, 
+            key='check_pontos_ipe'
+        )
+    # ===== FIM AJUSTE 3 =====
+
 
 with col_stats:
-    # ============================================================
-    # ESTATÍSTICAS DOS CRUZAMENTOS (lado direito do mapa)
-    # ============================================================
     if not st.session_state.cruzamentos_calculados.empty:
         df_calc = st.session_state.cruzamentos_calculados
         df_sel = st.session_state.ultimo_selecionados
@@ -975,171 +1290,385 @@ with col_stats:
         total_sel = len(df_sel)
         total_cobertos = len(ids_cobertos)
         
-        # Cobertura por eixo
+        qtd_pontos_minimos = len(df_pontos_minimos_usados) if not df_pontos_minimos_usados.empty else 0
+        cameras_pontos_minimos = df_pontos_minimos_usados['cameras'].sum() if not df_pontos_minimos_usados.empty and 'cameras' in df_pontos_minimos_usados.columns else 0
+        
+        qtd_pontos_ipe = total_sel
+        cameras_pontos_ipe = df_sel['cameras'].sum() if not df_sel.empty and 'cameras' in df_sel.columns else 0
+        
+        total_pontos = qtd_pontos_minimos + qtd_pontos_ipe
+        total_cameras = total_cameras_usado
+
+        custo_unitario = 1610
+        custo_total_geral = total_cameras * custo_unitario
+        custo_formatado = f"R$ {custo_total_geral:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        
+        # COBERTURA EFETIVA: cruzamentos cobertos pelo raio das câmeras
+        df_cobertos = df_calc[df_calc['id'].isin(ids_cobertos)]
+        
+        # Calcular cobertura efetiva: somar IPE de todos os cruzamentos cobertos
+        # (cruzamentos dentro do raio de pelo menos uma câmera)
+        ipe_total_coberto_ajustado = 0
+        ipe_seg_coberto_ajustado = 0
+        ipe_lct_coberto_ajustado = 0
+        ipe_com_coberto_ajustado = 0
+        ipe_mob_coberto_ajustado = 0
+        
+        for _, cruz in df_cobertos.iterrows():
+            ipe_total_coberto_ajustado += cruz['ipe_cruz']
+            ipe_seg_coberto_ajustado += cruz['ipe_cruz_seg']
+            ipe_lct_coberto_ajustado += cruz['ipe_cruz_lct']
+            ipe_com_coberto_ajustado += cruz['ipe_cruz_com']
+            ipe_mob_coberto_ajustado += cruz['ipe_cruz_mob']
+        
+        t_total = df_calc['ipe_cruz'].sum() or 1
         t_seg = df_calc['ipe_cruz_seg'].sum() or 1
         t_lct = df_calc['ipe_cruz_lct'].sum() or 1
         t_com = df_calc['ipe_cruz_com'].sum() or 1
         t_mob = df_calc['ipe_cruz_mob'].sum() or 1
         
-        if ids_cobertos:
-            df_cobertos = df_calc[df_calc['id'].isin(ids_cobertos)]
-            cov_seg = df_cobertos['ipe_cruz_seg'].sum() / t_seg * 100
-            cov_lct = df_cobertos['ipe_cruz_lct'].sum() / t_lct * 100
-            cov_com = df_cobertos['ipe_cruz_com'].sum() / t_com * 100
-            cov_mob = df_cobertos['ipe_cruz_mob'].sum() / t_mob * 100
-        else:
-            cov_seg = cov_lct = cov_com = cov_mob = 0
+        cobertura_real_ajustada = ipe_total_coberto_ajustado / t_total
+        cov_seg = (ipe_seg_coberto_ajustado / t_seg * 100) if t_seg > 0 else 0
+        cov_lct = (ipe_lct_coberto_ajustado / t_lct * 100) if t_lct > 0 else 0
+        cov_com = (ipe_com_coberto_ajustado / t_com * 100) if t_com > 0 else 0
+        cov_mob = (ipe_mob_coberto_ajustado / t_mob * 100) if t_mob > 0 else 0
         
-        # Simulação de custo
-        cont = df_sel['camera_tipo'].value_counts().to_dict() if not df_sel.empty else {}
-        qtd_ptz, qtd_360 = cont.get('PTZ', 0), cont.get('360', 0)
-        qtd_fixa, qtd_lpr = cont.get('FIXA', 0), cont.get('LPR', 0)
+        # CALCULAR COBERTURAS ADICIONAIS
+        df_todos_pontos = st.session_state.ultimo_selecionados.copy()
+        if not df_pontos_minimos_usados.empty:
+            df_pontos_min_adaptado = df_pontos_minimos_usados[['lat', 'lon']].copy()
+            for col in df_todos_pontos.columns:
+                if col not in df_pontos_min_adaptado.columns:
+                    df_pontos_min_adaptado[col] = ''
+            df_todos_pontos = pd.concat([df_todos_pontos, df_pontos_min_adaptado], ignore_index=True)
         
-        # custo_total = qtd_ptz*preco_ptz + qtd_360*preco_360 + qtd_fixa*preco_fixa + qtd_lpr*preco_lpr
-        total_cams = qtd_ptz + qtd_360 + qtd_fixa + qtd_lpr
+        df_full = st.session_state.equipamentos.copy()
+        df_full['eixo_norm'] = df_full['eixo'].astype(str).str.strip().str.upper()
+        total_equipamentos_lct_seg = len(df_full[
+            (df_full['eixo_norm'].isin(['LCT', 'SEG'])) & 
+            (df_full['peso'] >= nota_min_equip)
+        ])
+        equipamentos_lct_seg = verificar_equipamentos_proximos(
+            df_todos_pontos, st.session_state.equipamentos, 
+            raio_cobertura, nota_min_equip, ['LCT', 'SEG']
+        )
+        total_lct_seg = sum(qtd for _, qtd in equipamentos_lct_seg)
+        pct_equipamentos = (total_lct_seg / total_equipamentos_lct_seg * 100) if total_equipamentos_lct_seg > 0 else 0
         
-        st.markdown("#### 📊 Pontos Monitorados")
+        total_equipamentos_com = len(df_full[
+            (df_full['eixo_norm'] == 'COM') & 
+            (df_full['peso'] >= nota_min_equip)
+        ])
+        equipamentos_com = verificar_equipamentos_proximos(
+            df_todos_pontos, st.session_state.equipamentos, 
+            raio_cobertura, nota_min_equip, ['COM']
+        )
+        total_com_equip = sum(qtd for _, qtd in equipamentos_com)
+        pct_comercial = (total_com_equip / total_equipamentos_com * 100) if total_equipamentos_com > 0 else 0
+        
+        alagamentos_cobertos = verificar_alagamentos_por_raio(
+            df_todos_pontos, 
+            st.session_state.alagamentos, 
+            raio_cobertura
+        )
+        total_alvos_alagamento = len(st.session_state.alagamentos)
+        qtd_alag = len(alagamentos_cobertos)
+        pct_alagamentos = (qtd_alag / total_alvos_alagamento * 100) if total_alvos_alagamento > 0 else 0
+        
+        df_cobertos = df_calc[df_calc['id'].isin(ids_cobertos)]
+        qtd_sinistros_cobertos, total_sinistros, logradouros_sinistros_cobertos = verificar_sinistros_por_logradouro(
+            df_cobertos,
+            st.session_state.sinistros
+        )
+        pct_sinistros = (qtd_sinistros_cobertos / total_sinistros * 100) if total_sinistros > 0 else 0
+
+        
+        # EXIBIR ESTATÍSTICAS
+        st.markdown("#### 📊 Pontos e Câmeras")
         
         stats_html = f"""<div class="stat-box">
-            <div class="stat-row"><span>Total de pontos:</span><span class="stat-value">{total_cruz:,}</span></div>"""
+            <div class="stat-row"><span>Total de pontos disponíveis:</span><span class="stat-value">{total_cruz:,}</span></div>"""
         
-        if max_cruzamentos is not None:
+        if qtd_pontos_minimos > 0:
             stats_html += f"""
-            <div class="stat-row"><span>Limite de pontos:</span><span class="stat-value">{max_cruzamentos:,}</span></div>"""
+            <div class="stat-row"><span>Pontos obrigatórios:</span><span class="stat-value">{qtd_pontos_minimos:,} pts ({int(cameras_pontos_minimos)} câm)</span></div>"""
+        
+        stats_html += f"""
+            <div class="stat-row"><span>Pontos via IPE:</span><span class="stat-value">{qtd_pontos_ipe:,} pts ({int(cameras_pontos_ipe)} câm)</span></div>"""
+        
+        stats_html += f"""</div>
+        <div class="stat-box">
+            <div class="stat-row"><span><b>Total de pontos:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_pontos:,}</span></div>
+            <div class="stat-row"><span><b>Total de câmeras:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_cameras:,}</span></div>
+            <div class="stat-row" style="margin-top: 5px; font-size: 1rem;"><span><b>Custo Total:</b></span><span class="stat-value" style="color: #4ade80;">{custo_formatado}</span></div>"""        
 
-        stats_html += f"""<div class="stat-box">
-            <div class="stat-row"><span>Pontos monitorados:</span><span class="stat-value">{total_cobertos:,}</span></div>
-            <div class="stat-row"><span>Total de câmeras:</span><span class="stat-value">{int(total_cobertos*0.5*3 + total_cobertos*0.3*2 + total_cobertos*0.2*1):,}</span></div>"""        
-        
         stats_html += f"""
-            <div class="stat-row"><span>Raio de cobertura:</span><span class="stat-value">{raio_cobertura}m</span></div>"""
-        
-        if limite_cob_log is not None:
-            stats_html += f"""
-            <div class="stat-row"><span>Limite por logradouro:</span><span class="stat-value">{limite_cob_log*100:.0f}%</span></div>"""
-        
-        stats_html += f"""
-            <div class="stat-row"><span>Cobertura efetiva:</span><span class="stat-value" style="color: {'#4ade80' if cobertura_real >= cobertura_pct/100 else '#fbbf24'};">{cobertura_real*100:.1f}%</span></div>
+            <div class="stat-row" style="border-top: 1px solid rgba(148, 163, 184, 0.3); margin-top: 8px; padding-top: 8px;">
+                <span>Cobertura de risco IPE:</span><span class="stat-value" style="color: #4ade80;">{cobertura_ajustada_total:.1f}%</span>
+            </div>
+            <div class="stat-row"><span>Equipamentos:</span><span class="stat-value">{pct_equipamentos:.1f}%</span></div>
+            <div class="stat-row"><span>Comercial:</span><span class="stat-value">{pct_comercial:.1f}%</span></div>
+            <div class="stat-row"><span>Alagamentos:</span><span class="stat-value">{pct_alagamentos:.1f}%</span></div>
+            <div class="stat-row"><span>Sinistros:</span><span class="stat-value">{pct_sinistros:.1f}% ({qtd_sinistros_cobertos}/{total_sinistros})</span></div>
         </div>"""
         
         st.markdown(stats_html, unsafe_allow_html=True)
-        
+
         st.markdown("#### 📈 Cobertura por Eixo")
         st.markdown(f"""<div class="stat-box">
-            <div class="stat-row"><span>Seguranca:</span><span class="stat-value">{cov_seg:.1f}%</span></div>
-            <div class="stat-row"><span>LCT:</span><span class="stat-value">{cov_lct:.1f}%</span></div>
-            <div class="stat-row"><span>Comercial:</span><span class="stat-value">{cov_com:.1f}%</span></div>
-            <div class="stat-row"><span>Mobilidade:</span><span class="stat-value">{cov_mob:.1f}%</span></div>
+            <div class="stat-row"><span>Seguranca:</span><span class="stat-value">{cobertura_ajustada_eixos['seg']:.1f}%</span></div>
+            <div class="stat-row"><span>Lazer, Cultura e Turismo:</span><span class="stat-value">{cobertura_ajustada_eixos['lct']:.1f}%</span></div>
+            <div class="stat-row"><span>Comercial:</span><span class="stat-value">{cobertura_ajustada_eixos['com']:.1f}%</span></div>
+            <div class="stat-row"><span>Mobilidade:</span><span class="stat-value">{cobertura_ajustada_eixos['mob']:.1f}%</span></div>
         </div>""", unsafe_allow_html=True)
 
-        st.markdown("#### $ Custos das Câmeras")
+        # st.markdown("#### 🎯 Cobertura por Logradouro (Ajustada)")
+        # qtd_100 = cobertura_ajustada_eixos.get('qtd_100', 0)
+        # total_logs = cobertura_ajustada_eixos.get('total_logs', 0)
+        # st.markdown(f"""<div class="highlight-box">
+        #     <div class="stat-row" style="border-bottom: 1px solid rgba(34, 197, 94, 0.4); padding-bottom: 5px; margin-bottom: 5px;">
+        #         <span><b>Cobertura Total Ajustada:</b></span><span style="color: #86efac; font-weight: 700; font-size: 1.1rem;">{cobertura_ajustada_total:.1f}%</span>
+        #     </div>
+        #     <div style="font-size: 0.75rem; color: #86efac; margin-bottom: 3px;">
+        #         Logradouros com ≥50% → 100% | Logradouros com &lt;50% → mantém atual
+        #     </div>
+        #     <div style="font-size: 0.7rem; color: #64748b;">
+        #         {qtd_100} de {total_logs} logradouros atingiram 100% de cobertura
+        #     </div>
+        # </div>""", unsafe_allow_html=True)
         
-        # Download
+        # st.markdown(f"""<div class="stat-box">
+        #     <div class="stat-row"><span>Seguranca:</span><span class="stat-value">{cobertura_ajustada_eixos['seg']:.1f}%</span></div>
+        #     <div class="stat-row"><span>Lazer, Cultura e Turismo:</span><span class="stat-value">{cobertura_ajustada_eixos['lct']:.1f}%</span></div>
+        #     <div class="stat-row"><span>Comercial:</span><span class="stat-value">{cobertura_ajustada_eixos['com']:.1f}%</span></div>
+        #     <div class="stat-row"><span>Mobilidade:</span><span class="stat-value">{cobertura_ajustada_eixos['mob']:.1f}%</span></div>
+        # </div>""", unsafe_allow_html=True)
+        
         csv_data = gerar_csv_download(df_calc, df_sel)
         st.download_button("📥 Baixar CSV", csv_data, "ipe_cruzamentos.csv", "text/csv", use_container_width=True)
     else:
-        st.info("👆 Carregue o Excel de cruzamentos na sidebar para iniciar.")
+        st.info("⚠️ Nenhum arquivo foi carregado. Verifique o diretório 'data/'.")
 
 # ============================================================
-# SEÇÃO ABAIXO DO MAPA - Equipamentos, Alagamentos e Sinistros
+# SEÇÃO ABAIXO DO MAPA - CARDS DETALHADOS
 # ============================================================
 st.markdown("---")
 
-# Três colunas para as seções abaixo do mapa
-col_equip, col_alag, col_sinist = st.columns(3)
+col_equip_lct, col_equip_com, col_alag, col_sinist = st.columns(4)
 
-# Coluna 1: Equipamentos
-with col_equip:
-    if not st.session_state.equipamentos.empty:
-        stats_equip = gerar_estatisticas_equipamentos(st.session_state.equipamentos, nota_min_equip)
+with col_equip_lct:
+    if not st.session_state.equipamentos.empty and not st.session_state.cruzamentos_calculados.empty:
+        df_todos_pontos = st.session_state.ultimo_selecionados.copy()
         
-        if stats_equip and stats_equip['total'] > 0:
-            # Tipos de equipamentos
-            html_tipos = ""
-            for nome, qtd in stats_equip['tipos'].items():
+        if not df_pontos_minimos_usados.empty:
+            df_pontos_min_adaptado = df_pontos_minimos_usados[['lat', 'lon']].copy()
+            for col in df_todos_pontos.columns:
+                if col not in df_pontos_min_adaptado.columns:
+                    df_pontos_min_adaptado[col] = ''
+            
+            df_todos_pontos = pd.concat([df_todos_pontos, df_pontos_min_adaptado], ignore_index=True)
+        
+        df_full = st.session_state.equipamentos.copy()
+        df_full['eixo_norm'] = df_full['eixo'].astype(str).str.strip().str.upper()
+        total_equipamentos_lct_seg = len(df_full[
+            (df_full['eixo_norm'].isin(['LCT', 'SEG'])) & 
+            (df_full['peso'] >= nota_min_equip)
+        ])
+        
+        equipamentos_lct_seg = verificar_equipamentos_proximos(
+            df_todos_pontos, 
+            st.session_state.equipamentos, 
+            raio_cobertura,
+            nota_min_equip,
+            ['LCT', 'SEG']
+        )
+        
+        total_lct_seg = sum(qtd for _, qtd in equipamentos_lct_seg)
+        pct_lct_seg = (total_lct_seg / total_equipamentos_lct_seg * 100) if total_equipamentos_lct_seg > 0 else 0
+        
+        if total_lct_seg > 0:
+            html_main = ""
+            for nome, qtd in equipamentos_lct_seg:
                 if nome and str(nome).strip() != "":
-                    html_tipos += f'<div class="stat-row"><span>{nome}:</span><span class="stat-value">{qtd}</span></div>'
+                    html_main += f'<div class="stat-row"><span>{nome}:</span><span class="stat-value">{qtd}</span></div>'
             
-            if not html_tipos:
-                html_tipos = '<div class="stat-row"><span>Nenhum equipamento.</span></div>'
-            
-            # Prioridades
-            labels_prioridade = {5: "Alta Prioridade", 3: "Média Prioridade", 1: "Baixa Prioridade"}
-            html_prioridade = ""
-            for peso, qtd in stats_equip['prioridades'].items():
-                try:
-                    peso_key = int(peso)
-                except:
-                    peso_key = peso
-                label_final = labels_prioridade.get(peso_key, f"Prioridade {peso_key}")
-                html_prioridade += f'<div class="stat-row"><span>{label_final}:</span><span class="stat-value">{qtd}</span></div>'
-            
-            st.markdown(f"#### 🏢 Equipamentos (Nota ≥ {nota_min_equip})")
+            st.markdown(f"#### 🏢 Equipamentos")
             st.markdown(f"""<div class="stat-box" style="margin-bottom: 1rem;">
-                <div style="max-height: 150px; overflow-y: auto; padding-right: 5px;">{html_tipos}</div>
-                <div class="stat-row" style="border-top: 1px solid rgba(148, 163, 184, 0.3); margin-top: 5px; padding-top: 5px;">
-                    <span><b>Total Filtrado:</b></span><span class="stat-value">{stats_equip['total']}</span>
+                <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
+                    <span><b>Cobertura:</b></span><span class="stat-value">{total_lct_seg} ({pct_lct_seg:.1f}%)</span>
+                </div>
+                <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
+                    Calculado sobre {total_equipamentos_lct_seg} equipamentos mapeados.
+                </div>
+                <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
+                    {html_main}
                 </div>
             </div>""", unsafe_allow_html=True)
-            
+        else:
+            st.markdown(f"#### 🏢 Equipamentos")
+            st.markdown(f"""<div class="stat-box">
+                <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
+                    <span><b>Cobertura:</b></span><span class="stat-value">0 (0.0%)</span>
+                </div>
+                <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
+                    Calculado sobre {total_equipamentos_lct_seg} equipamentos mapeados.
+                </div>
+                <div class="stat-row"><span>Nenhum equipamento LCT/SEG próximo.</span></div>
+            </div>""", unsafe_allow_html=True)
     else:
         st.markdown("#### 🏢 Equipamentos")
-        st.markdown("""<div class="stat-box">
-            <div class="stat-row"><span>Carregue o arquivo de equipamentos.</span></div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
 
-# Coluna 2: Alagamentos
+with col_equip_com:
+    if not st.session_state.equipamentos.empty and not st.session_state.cruzamentos_calculados.empty:
+        df_todos_pontos = st.session_state.ultimo_selecionados.copy()
+        
+        if not df_pontos_minimos_usados.empty:
+            df_pontos_min_adaptado = df_pontos_minimos_usados[['lat', 'lon']].copy()
+            for col in df_todos_pontos.columns:
+                if col not in df_pontos_min_adaptado.columns:
+                    df_pontos_min_adaptado[col] = ''
+            
+            df_todos_pontos = pd.concat([df_todos_pontos, df_pontos_min_adaptado], ignore_index=True)
+        
+        df_full = st.session_state.equipamentos.copy()
+        df_full['eixo_norm'] = df_full['eixo'].astype(str).str.strip().str.upper()
+        total_equipamentos_com = len(df_full[
+            (df_full['eixo_norm'] == 'COM') & 
+            (df_full['peso'] >= nota_min_equip)
+        ])
+        
+        equipamentos_com = verificar_equipamentos_proximos(
+            df_todos_pontos, 
+            st.session_state.equipamentos, 
+            raio_cobertura,
+            nota_min_equip,
+            ['COM']
+        )
+        
+        total_com = sum(qtd for _, qtd in equipamentos_com)
+        pct_com = (total_com / total_equipamentos_com * 100) if total_equipamentos_com > 0 else 0
+        
+        if total_com > 0:
+            html_com = ""
+            for nome, qtd in equipamentos_com:
+                if nome and str(nome).strip() != "":
+                    html_com += f'<div class="stat-row"><span>{nome}:</span><span class="stat-value">{qtd}</span></div>'
+            
+            st.markdown(f"#### 🏪 Comercial")
+            st.markdown(f"""<div class="stat-box" style="margin-bottom: 1rem;">
+                <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
+                    <span><b>Cobertura:</b></span><span class="stat-value">{total_com} ({pct_com:.1f}%)</span>
+                </div>
+                <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
+                    Calculado sobre {total_equipamentos_com} equipamentos mapeados.
+                </div>
+                <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
+                    {html_com}
+                </div>
+            </div>""", unsafe_allow_html=True)
+        else:
+            st.markdown(f"#### 🏪 Comercial")
+            st.markdown(f"""<div class="stat-box">
+                <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
+                    <span><b>Cobertura:</b></span><span class="stat-value">0 (0.0%)</span>
+                </div>
+                <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
+                    Calculado sobre {total_equipamentos_com} equipamentos mapeados.
+                </div>
+                <div class="stat-row"><span>Nenhum equipamento Comercial próximo.</span></div>
+            </div>""", unsafe_allow_html=True)
+    else:
+        st.markdown("#### 🏪 Comercial")
+        st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
+
 with col_alag:
-    if not st.session_state.cruzamentos_calculados.empty:
-        df_sel = st.session_state.ultimo_selecionados
-        alagamentos_encontrados = verificar_alagamentos(df_sel)
+    if not st.session_state.cruzamentos_calculados.empty and not st.session_state.alagamentos.empty:
+        df_todos_pontos_alag = st.session_state.ultimo_selecionados.copy()
+        
+        if not df_pontos_minimos_usados.empty:
+            df_pontos_min_adaptado = df_pontos_minimos_usados[['lat', 'lon']].copy()
+            for col in df_todos_pontos_alag.columns:
+                if col not in df_pontos_min_adaptado.columns:
+                    df_pontos_min_adaptado[col] = ''
+            df_todos_pontos_alag = pd.concat([df_todos_pontos_alag, df_pontos_min_adaptado], ignore_index=True)
+        
+        alagamentos_encontrados = verificar_alagamentos_por_raio(
+            df_todos_pontos_alag, 
+            st.session_state.alagamentos, 
+            raio_cobertura
+        )
+        
+        total_alvos_alagamento = len(st.session_state.alagamentos)
+        qtd_alag = len(alagamentos_encontrados)
+        pct_alag = (qtd_alag / total_alvos_alagamento * 100) if total_alvos_alagamento > 0 else 0
         
         html_alagamentos = ""
         if alagamentos_encontrados:
             for alag in alagamentos_encontrados:
-                html_alagamentos += f'<div class="stat-row" style="justify-content: flex-start;"><span style="color:#fbbf24;">⚠️ {alag}</span></div>'
+                alag_display = alag if len(alag) <= 60 else alag[:57] + "..."
+                html_alagamentos += f'<div class="stat-row" style="justify-content: flex-start;"><span style="color:#fbbf24; font-size: 0.7rem;">⚠️ {alag_display}</span></div>'
         else:
-            html_alagamentos = '<div class="stat-row"><span>Nenhum ponto de alagamento nos filtros atuais.</span></div>'
+            html_alagamentos = '<div class="stat-row"><span>Nenhum ponto de alagamento.</span></div>'
         
-        st.markdown("#### 🌊 Pontos de Alagamento")
+        st.markdown("#### 🌊 Alagamentos")
         st.markdown(f"""<div class="stat-box">
             <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
-                <span><b>Cruzamentos Críticos:</b></span><span class="stat-value">{len(alagamentos_encontrados)}</span>
+                <span><b>Cobertura:</b></span><span class="stat-value">{qtd_alag} ({pct_alag:.1f}%)</span>
             </div>
-            <div style="max-height: 200px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
+            <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
+                Calculado sobre {total_alvos_alagamento} pontos mapeados.
+            </div>
+            <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
                 {html_alagamentos}
             </div>
         </div>""", unsafe_allow_html=True)
     else:
-        st.markdown("#### 🌊 Pontos de Alagamento")
-        st.markdown("""<div class="stat-box">
-            <div class="stat-row"><span>Carregue os dados para visualizar.</span></div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown("#### 🌊 Alagamentos")
+        st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
 
-# Coluna 3: Sinistros
 with col_sinist:
-    if not st.session_state.cruzamentos_calculados.empty:
-        df_sel = st.session_state.ultimo_selecionados
-        sinistros_encontrados = verificar_sinistros(df_sel)
+    if not st.session_state.cruzamentos_calculados.empty and not st.session_state.sinistros.empty:
+        df_todos_cobertos = st.session_state.cruzamentos_calculados[
+            st.session_state.cruzamentos_calculados['id'].isin(ids_cobertos)
+        ]
+        
+        qtd_sinistros_cobertos, total_sinistros, logradouros_encontrados = verificar_sinistros_por_logradouro(
+            df_todos_cobertos,
+            st.session_state.sinistros
+        )
+        
+        qtd_ruas = len(logradouros_encontrados)
+        total_ruas = len(st.session_state.sinistros)
+        pct_sinist = (qtd_sinistros_cobertos / total_sinistros * 100) if total_sinistros > 0 else 0
         
         html_sinistros = ""
-        if sinistros_encontrados:
-            for rua in sinistros_encontrados:
-                html_sinistros += f'<div class="stat-row" style="justify-content: flex-start;"><span style="color:#f87171;">🚗 {rua}</span></div>'
+        if logradouros_encontrados:
+            sinistros_dict = {}
+            for _, row in st.session_state.sinistros.iterrows():
+                log_norm = str(row['logradouro']).strip().upper()
+                qtd = int(row.get('qtd', 1))
+                sinistros_dict[log_norm] = qtd
+            
+            for rua in logradouros_encontrados:
+                qtd_nesta_rua = sinistros_dict.get(rua, 0)
+                rua_display = rua if len(rua) <= 50 else rua[:47] + "..."
+                html_sinistros += f'<div class="stat-row" style="justify-content: space-between;"><span style="color:#f87171; font-size: 0.7rem;">🚗 {rua_display}</span><span class="stat-value" style="font-size: 0.7rem;">{qtd_nesta_rua}</span></div>'
         else:
-            html_sinistros = '<div class="stat-row"><span>Nenhuma rua com histórico de sinistros.</span></div>'
+            html_sinistros = '<div class="stat-row"><span>Nenhuma rua com sinistros.</span></div>'
         
-        st.markdown("#### 🚗 Ruas com Histórico de Sinistros")
+        st.markdown("#### 🚗 Sinistros")
         st.markdown(f"""<div class="stat-box">
             <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
-                <span><b>Ruas com Sinistros:</b></span><span class="stat-value">{len(sinistros_encontrados)}</span>
+                <span><b>Cobertura:</b></span><span class="stat-value">{qtd_sinistros_cobertos}/{total_sinistros} ({pct_sinist:.1f}%)</span>
             </div>
-            <div style="max-height: 200px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
+            <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
+                {qtd_ruas} de {total_ruas} ruas cobertas.
+            </div>
+            <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
                 {html_sinistros}
             </div>
         </div>""", unsafe_allow_html=True)
     else:
-        st.markdown("#### 🚗 Ruas com Histórico de Sinistros")
-        st.markdown("""<div class="stat-box">
-            <div class="stat-row"><span>Carregue os dados para visualizar.</span></div>
-        </div>""", unsafe_allow_html=True)
+        st.markdown("#### 🚗 Sinistros")
+        st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
