@@ -1073,7 +1073,7 @@ if not st.session_state.arquivos_carregados:
 with st.sidebar:
     st.markdown("## 🎛️ Controles")
     
-    st.markdown('<div class="section-title">📁 Status dos Arquivos</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📁 Estatísticas gerais</div>', unsafe_allow_html=True)
     
     status_html = '<div class="stat-box">'
     if not st.session_state.logs.empty:
@@ -1108,35 +1108,34 @@ with st.sidebar:
     status_html += '</div>'
     st.markdown(status_html, unsafe_allow_html=True)
     
-    if st.button("🔄 Recarregar Arquivos", use_container_width=True):
-        st.session_state.arquivos_carregados = False
-        st.rerun()
-    
-    st.markdown("---")
+    # if st.button("🔄 Recarregar Arquivos", use_container_width=True):
+    #     st.session_state.arquivos_carregados = False
+    #     st.rerun()
 
-    nota_min_equip = st.slider("Nota minima equipamentos", 1, 5, 4, key='nota_equip')
+    # nota_min_equip = st.slider("Nota minima equipamentos", 1, 5, 4, key='nota_equip')
+    nota_min_equip = 4
     
     # ===== AJUSTE 1 E 2: FILTROS DE COBERTURA E LIMITE DE CÂMERAS =====
-    st.markdown('<div class="section-title">2. Limite de Otimização</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">1. Limite de Otimização</div>', unsafe_allow_html=True)
     
     modo_limite = st.radio(
         "Escolha o modo de limite:",
         ["Quantidade de Câmeras","Cobertura Alvo (%)"],
         key='modo_limite',
-        help="Cobertura Alvo: otimiza até atingir % de cobertura desejada. Quantidade: limita o número total de câmeras."
+        help="Cobertura Alvo: otimiza até atingir % de cobertura desejada, restrito às condições de filtros. Quantidade: limita o número total de câmeras."
     )
     
     if modo_limite == "Cobertura Alvo (%)":
         # AJUSTE 1: Filtro de Cobertura Alvo Efetiva IPE
         cobertura_pct = st.slider(
             "Cobertura alvo efetiva IPE (%)", 
-            50, 80, 80, step=5, 
+            0, 100, 80, step=5, 
             key='cobertura_alvo',
             help="Percentual de cobertura efetiva do IPE a ser atingido"
         )
         max_cameras = None
         st.markdown(f'''<div class="info-box">
-            ℹ️ O otimizador buscará atingir <b>{cobertura_pct}%</b> de cobertura efetiva
+            ℹ️ O otimizador buscará atingir <b>{cobertura_pct}%</b> de cobertura efetiva, restrito à distância mínima entre câmeras.
         </div>''', unsafe_allow_html=True)
     else:
         # AJUSTE 2: Limite Mínimo de 250 Câmeras
@@ -1144,38 +1143,40 @@ with st.sidebar:
         max_cameras = st.number_input(
             "Máximo de câmeras", 
             min_value=250,  # ← AJUSTE 2: LIMITE MÍNIMO
-            max_value=3000, 
+            max_value=10000, 
             value=500, 
             step=10, 
             key='max_cameras',
             help="Limite total de câmeras no sistema (50% dos pontos = 3 câm, 30% = 2 câm, 20% = 1 câm). Mínimo: 250 câmeras"
         )
         st.markdown(f'''<div class="info-box">
-            ℹ️ Limite fixo de <b>{max_cameras}</b> câmeras (distribuição: 50% com 3 câm, 30% com 2 câm, 20% com 1 câm)
+            ℹ️ Limite fixo de <b>{max_cameras}</b> câmeras (distribuição: 50% dos pontos com 3 câm, 30% com 2 câm, 20% com 1 câm)
         </div>''', unsafe_allow_html=True)
     
     max_cruzamentos = None
     # ===== FIM AJUSTE 1 E 2 =====
     
-    st.markdown('<div class="section-title">3a. Distancia minima entre câmeras</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">2. Distancia minima entre câmeras</div>', unsafe_allow_html=True)
     dist_min = st.slider("Distancia (m)", 50, 500, 300, step=50, key='dist_min', help="Distancia minima entre câmeras que compartilham o mesmo logradouro")
     
-    st.markdown('<div class="section-title">3b. Raio de cobertura das cameras</div>', unsafe_allow_html=True)
-    raio_cobertura = st.slider("Raio (m)",50, 250, 50, step=50, key='raio_cobertura')
+    # st.markdown('<div class="section-title">3b. Raio de cobertura das cameras</div>', unsafe_allow_html=True)
+    # raio_cobertura = st.slider("Raio (m)",50, 250, 50, step=50, key='raio_cobertura')
+    raio_cobertura=50
     
-    st.markdown('<div class="section-title">4. Limite de cobertura por logradouro</div>', unsafe_allow_html=True)
-    usar_limite_log = st.checkbox("Limitar cobertura por rua", value=False, key='usar_limite_log',
-                                   help="Evita concentracao de cameras em uma unica rua")
-    if usar_limite_log:
-        limite_cob_log = st.slider("Maximo por logradouro (%)", 10, 100, 50, step=5, key='limite_log',
-                                    help="Limita quanto do IPE de cada rua pode ser coberto") / 100
-        st.markdown(f"""<div class="info-box">
-            ℹ️ Cada rua tera no maximo <b>{limite_cob_log*100:.0f}%</b> do seu IPE coberto
-        </div>""", unsafe_allow_html=True)
-    else:
-        limite_cob_log = None
+    # st.markdown('<div class="section-title">4. Limite de cobertura por logradouro</div>', unsafe_allow_html=True)
+    # usar_limite_log = st.checkbox("Limitar cobertura por rua", value=False, key='usar_limite_log',
+    #                                help="Evita concentracao de cameras em uma unica rua")
+    # if usar_limite_log:
+    #     limite_cob_log = st.slider("Maximo por logradouro (%)", 10, 100, 50, step=5, key='limite_log',
+    #                                 help="Limita quanto do IPE de cada rua pode ser coberto") / 100
+    #     st.markdown(f"""<div class="info-box">
+    #         ℹ️ Cada rua tera no maximo <b>{limite_cob_log*100:.0f}%</b> do seu IPE coberto
+    #     </div>""", unsafe_allow_html=True)
+    # else:
+    #     limite_cob_log = None
+    limite_cob_log = None
     
-    st.markdown('<div class="section-title">5. Pesos dos eixos</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">3. Pesos dos eixos IPE</div>', unsafe_allow_html=True)
     peso_seg = st.slider("Seguranca", 0, 100, 15, key='peso_seg')
     peso_lct = st.slider("LCT", 0, 100, 30, key='peso_lct')
     peso_com = st.slider("Comercial", 0, 100, 15, key='peso_com')
@@ -1391,31 +1392,40 @@ with col_stats:
         
         if qtd_pontos_minimos > 0:
             stats_html += f"""
-            <div class="stat-row"><span>Pontos obrigatórios:</span><span class="stat-value">{qtd_pontos_minimos:,} pts ({int(cameras_pontos_minimos)} câm)</span></div>"""
+            <div class="stat-row"><span>Pontos mínimos:</span><span class="stat-value">{qtd_pontos_minimos:,} pts ({int(cameras_pontos_minimos)} câm)</span></div>"""
         
         stats_html += f"""
-            <div class="stat-row"><span>Pontos via IPE:</span><span class="stat-value">{qtd_pontos_ipe:,} pts ({int(cameras_pontos_ipe)} câm)</span></div>"""
-        
-        stats_html += f"""</div>
-        <div class="stat-box">
+            <div class="stat-row"><span>Pontos otimizados:</span><span class="stat-value">{qtd_pontos_ipe:,} pts ({int(cameras_pontos_ipe)} câm)</span></div>
             <div class="stat-row"><span><b>Total de pontos:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_pontos:,}</span></div>
             <div class="stat-row"><span><b>Total de câmeras:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_cameras:,}</span></div>
-            <div class="stat-row" style="margin-top: 5px; font-size: 1rem;"><span><b>Custo Total:</b></span><span class="stat-value" style="color: #4ade80;">{custo_formatado}</span></div>"""        
+            <div class="stat-row" style="margin-top: 5px; font-size: 1rem;"><span><b>Custo Total:</b></span><span class="stat-value" style="color: #4ade80;">{custo_formatado}</span></div>"""
+        
+        # stats_html += f"""</div>
+        # <div class="stat-box">
+        #     <div class="stat-row"><span><b>Total de pontos:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_pontos:,}</span></div>
+        #     <div class="stat-row"><span><b>Total de câmeras:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_cameras:,}</span></div>
+        #     <div class="stat-row" style="margin-top: 5px; font-size: 1rem;"><span><b>Custo Total:</b></span><span class="stat-value" style="color: #4ade80;">{custo_formatado}</span></div>"""        
 
-        stats_html += f"""
-            <div class="stat-row" style="border-top: 1px solid rgba(148, 163, 184, 0.3); margin-top: 8px; padding-top: 8px;">
-                <span>Cobertura de risco IPE:</span><span class="stat-value" style="color: #4ade80;">{cobertura_ajustada_total:.1f}%</span>
-            </div>
+        # stats_html += f"""
+        #     <div class="stat-row"><span>Equipamentos:</span><span class="stat-value">{pct_equipamentos:.1f}%</span></div>
+        #     <div class="stat-row"><span>Comercial:</span><span class="stat-value">{pct_comercial:.1f}%</span></div>
+        #     <div class="stat-row"><span>Alagamentos:</span><span class="stat-value">{pct_alagamentos:.1f}%</span></div>
+        #     <div class="stat-row"><span>Sinistros:</span><span class="stat-value">{pct_sinistros:.1f}% ({qtd_sinistros_cobertos}/{total_sinistros})</span></div>
+        # </div>"""
+        
+        st.markdown(stats_html, unsafe_allow_html=True)
+
+        st.markdown("#### 🏙️ Cobertura da Cidade")
+        st.markdown(f"""<div class="stat-box">
             <div class="stat-row"><span>Equipamentos:</span><span class="stat-value">{pct_equipamentos:.1f}%</span></div>
             <div class="stat-row"><span>Comercial:</span><span class="stat-value">{pct_comercial:.1f}%</span></div>
             <div class="stat-row"><span>Alagamentos:</span><span class="stat-value">{pct_alagamentos:.1f}%</span></div>
             <div class="stat-row"><span>Sinistros:</span><span class="stat-value">{pct_sinistros:.1f}% ({qtd_sinistros_cobertos}/{total_sinistros})</span></div>
-        </div>"""
-        
-        st.markdown(stats_html, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
 
-        st.markdown("#### 📈 Cobertura por Eixo")
+        st.markdown("#### 📈 Cobertura de Risco IPE")
         st.markdown(f"""<div class="stat-box">
+            <div class="stat-row"<span>Cobertura de risco IPE:</span><span class="stat-value" style="color: #4ade80;">{cobertura_ajustada_total:.1f}%</span></div>
             <div class="stat-row"><span>Seguranca:</span><span class="stat-value">{cobertura_ajustada_eixos['seg']:.1f}%</span></div>
             <div class="stat-row"><span>Lazer, Cultura e Turismo:</span><span class="stat-value">{cobertura_ajustada_eixos['lct']:.1f}%</span></div>
             <div class="stat-row"><span>Comercial:</span><span class="stat-value">{cobertura_ajustada_eixos['com']:.1f}%</span></div>
