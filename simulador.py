@@ -1231,7 +1231,7 @@ with st.sidebar:
         max_cameras = st.number_input(
             "Máximo de câmeras", 
             min_value=250,  # ← AJUSTE 2: LIMITE MÍNIMO
-            max_value=10000, 
+            max_value=2500, 
             value=500, 
             step=10, 
             key='max_cameras',
