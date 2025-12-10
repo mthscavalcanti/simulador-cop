@@ -180,12 +180,14 @@ def distancia_metros(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
     return R * c
 
 
-def verificar_alagamentos_por_raio(df_cameras: pd.DataFrame, df_alagamentos: pd.DataFrame, raio_metros: float) -> list:
-    """Verifica quais pontos de alagamento estão dentro do raio de cobertura das câmeras"""
+def verificar_alagamentos_por_raio(df_cameras: pd.DataFrame, df_alagamentos: pd.DataFrame, 
+                                    raio_camera: float = 50, raio_ponto: float = 100) -> list:
+
     if df_cameras.empty or df_alagamentos.empty:
         return []
     
     alagamentos_cobertos = []
+    raio_total = raio_camera + raio_ponto  # 150m no caso padrão
     
     for _, alag in df_alagamentos.iterrows():
         alag_lat = alag['lat']
@@ -197,7 +199,7 @@ def verificar_alagamentos_por_raio(df_cameras: pd.DataFrame, df_alagamentos: pd.
             cam_lat = cam['lat']
             cam_lon = cam['lon']
             
-            if distancia_metros(alag_lat, alag_lon, cam_lat, cam_lon) <= raio_metros:
+            if distancia_metros(alag_lat, alag_lon, cam_lat, cam_lon) <= raio_total:
                 coberto = True
                 break
         
@@ -374,8 +376,9 @@ def calcular_cobertura_por_logradouro_ajustada(df_calculados: pd.DataFrame, ids_
 
 
 def verificar_equipamentos_proximos(df_selecionados: pd.DataFrame, df_equipamentos: pd.DataFrame, 
-                                     raio_metros: float, nota_min: int, eixos: list) -> list:
-    """Verifica quais equipamentos estão próximos aos cruzamentos selecionados"""
+                                     raio_camera: float = 50, nota_min: int = 4, eixos: list = None,
+                                     raio_equipamento: float = 100) -> list:
+    
     if df_selecionados.empty or df_equipamentos.empty:
         return []
     
@@ -401,6 +404,7 @@ def verificar_equipamentos_proximos(df_selecionados: pd.DataFrame, df_equipament
         return []
     
     equipamentos_encontrados = {}
+    raio_total = raio_camera + raio_equipamento  # 150m no caso padrão
     
     for _, equip in df_equip.iterrows():
         equip_lat, equip_lon = equip['lat'], equip['lon']
@@ -412,7 +416,7 @@ def verificar_equipamentos_proximos(df_selecionados: pd.DataFrame, df_equipament
         esta_proximo = False
         for ponto_lat, ponto_lon in pontos_selecionados:
             dist = distancia_metros(equip_lat, equip_lon, ponto_lat, ponto_lon)
-            if dist <= raio_metros:
+            if dist <= raio_total:
                 esta_proximo = True
                 break
         
@@ -999,7 +1003,7 @@ def criar_mapa(cruzamentos_selecionados: pd.DataFrame, equipamentos: pd.DataFram
                pontos_minimos_usados: pd.DataFrame = None, mostrar_pontos_minimos: bool = True,
                mostrar_pontos_ipe: bool = True) -> folium.Map:
     """Cria o mapa com os cruzamentos, equipamentos e pontos mínimos"""
-    m = folium.Map(location=[-8.05, -34.91], zoom_start=12, tiles='OpenStreetMap')
+    m = folium.Map(location=[-8.07, -34.91], zoom_start=12, tiles='OpenStreetMap')
     
     if bairros_geojson is not None:
         folium.GeoJson(bairros_geojson, style_function=lambda x: {
@@ -1260,25 +1264,25 @@ with col_mapa:
         st.session_state.mostrar_pontos_minimos,
         st.session_state.mostrar_pontos_ipe
     )
-    st_folium(mapa, width=None, height=520, returned_objects=[])
+    st_folium(mapa, width=None, height=650, returned_objects=[])
     
     # ===== AJUSTE 3: CHECKBOXES SIMPLIFICADOS ABAIXO DO MAPA =====
-    st.markdown("---")
-    col_check1, col_check2 = st.columns(2)
+    # st.markdown("---")
+    # col_check1, col_check2 = st.columns(2)
     
-    with col_check1:
-        st.session_state.mostrar_pontos_minimos = st.checkbox(
-            "📍 Mostrar Pontos Mínimos", 
-            value=st.session_state.mostrar_pontos_minimos, 
-            key='check_pontos_min'
-        )
+    # with col_check1:
+    #     st.session_state.mostrar_pontos_minimos = st.checkbox(
+    #         "📍 Mostrar Pontos Mínimos", 
+    #         value=st.session_state.mostrar_pontos_minimos, 
+    #         key='check_pontos_min'
+    #     )
     
-    with col_check2:
-        st.session_state.mostrar_pontos_ipe = st.checkbox(
-            "📊 Mostrar Pontos via IPE", 
-            value=st.session_state.mostrar_pontos_ipe, 
-            key='check_pontos_ipe'
-        )
+    # with col_check2:
+    #     st.session_state.mostrar_pontos_ipe = st.checkbox(
+    #         "📊 Mostrar Pontos via IPE", 
+    #         value=st.session_state.mostrar_pontos_ipe, 
+    #         key='check_pontos_ipe'
+    #     )
     # ===== FIM AJUSTE 3 =====
 
 
@@ -1350,8 +1354,12 @@ with col_stats:
             (df_full['peso'] >= nota_min_equip)
         ])
         equipamentos_lct_seg = verificar_equipamentos_proximos(
-            df_todos_pontos, st.session_state.equipamentos, 
-            raio_cobertura, nota_min_equip, ['LCT', 'SEG']
+            df_todos_pontos, 
+            st.session_state.equipamentos, 
+            raio_camera=raio_cobertura,  # 50m
+            nota_min=nota_min_equip,
+            eixos=['LCT', 'SEG'],
+            raio_equipamento=100  # 100m
         )
         total_lct_seg = sum(qtd for _, qtd in equipamentos_lct_seg)
         pct_equipamentos = (total_lct_seg / total_equipamentos_lct_seg * 100) if total_equipamentos_lct_seg > 0 else 0
@@ -1361,8 +1369,12 @@ with col_stats:
             (df_full['peso'] >= nota_min_equip)
         ])
         equipamentos_com = verificar_equipamentos_proximos(
-            df_todos_pontos, st.session_state.equipamentos, 
-            raio_cobertura, nota_min_equip, ['COM']
+            df_todos_pontos, 
+            st.session_state.equipamentos, 
+            raio_camera=raio_cobertura,  # 50m
+            nota_min=nota_min_equip,
+            eixos=['COM'],
+            raio_equipamento=100  # 100m
         )
         total_com_equip = sum(qtd for _, qtd in equipamentos_com)
         pct_comercial = (total_com_equip / total_equipamentos_com * 100) if total_equipamentos_com > 0 else 0
@@ -1370,7 +1382,8 @@ with col_stats:
         alagamentos_cobertos = verificar_alagamentos_por_raio(
             df_todos_pontos, 
             st.session_state.alagamentos, 
-            raio_cobertura
+            raio_camera=raio_cobertura,  # 50m
+            raio_ponto=100  # 100m
         )
         total_alvos_alagamento = len(st.session_state.alagamentos)
         qtd_alag = len(alagamentos_cobertos)
