@@ -27,6 +27,7 @@ ARQUIVO_EQUIPAMENTOS = DATA_DIR / "Equipamentos.xlsx"
 ARQUIVO_BAIRROS = DATA_DIR / "bairros.geojson"
 ARQUIVO_ALAGAMENTOS = DATA_DIR / "Alagamentos.xlsx"
 ARQUIVO_SINISTROS = DATA_DIR / "Sinistros.xlsx"
+ARQUIVO_VIAS_PRIORITARIAS = DATA_DIR / "Vias Prioritarias.xlsx"
 
 # ============================================================
 # CSS CUSTOMIZADO - Layout compacto
@@ -159,6 +160,8 @@ if 'alagamentos' not in st.session_state:
     st.session_state.alagamentos = pd.DataFrame()
 if 'sinistros' not in st.session_state:
     st.session_state.sinistros = pd.DataFrame()
+if 'vias_prioritarias' not in st.session_state:
+    st.session_state.vias_prioritarias = pd.DataFrame()
 if 'arquivos_carregados' not in st.session_state:
     st.session_state.arquivos_carregados = False
 
@@ -373,6 +376,42 @@ def calcular_cobertura_por_logradouro_ajustada(df_calculados: pd.DataFrame, ids_
     detalhes.sort(key=lambda x: x['cobertura_efetiva'], reverse=True)
     
     return cobertura_ajustada_total, dict_por_eixo, detalhes
+
+def verificar_vias_prioritarias_por_logradouro(df_cruzamentos_selecionados: pd.DataFrame, 
+                                                 df_vias_prioritarias: pd.DataFrame) -> tuple:
+    if df_cruzamentos_selecionados.empty or df_vias_prioritarias.empty:
+        return 0, 0, []
+    
+    # Criar dicionário de vias prioritárias com suas prioridades
+    vias_dict = {}
+    for _, row in df_vias_prioritarias.iterrows():
+        log_norm = str(row['logradouro']).strip().upper()
+        prioridade = int(row.get('prioridade', 5))
+        vias_dict[log_norm] = prioridade
+    
+    # Verificar quais vias prioritárias estão cobertas
+    vias_cobertas = {}
+    
+    for _, cruz in df_cruzamentos_selecionados.iterrows():
+        log1 = str(cruz.get('log1', '')).strip().upper()
+        log2 = str(cruz.get('log2', '')).strip().upper()
+        
+        if log1 in vias_dict and log1 not in vias_cobertas:
+            vias_cobertas[log1] = vias_dict[log1]
+        
+        if log2 in vias_dict and log2 not in vias_cobertas:
+            vias_cobertas[log2] = vias_dict[log2]
+    
+    qtd_vias_cobertas = len(vias_cobertas)
+    total_vias = len(vias_dict)
+    
+    # Criar lista ordenada por prioridade (menor número = maior prioridade)
+    lista_vias = sorted(
+        [(via, prio) for via, prio in vias_cobertas.items()],
+        key=lambda x: x[1]
+    )
+    
+    return qtd_vias_cobertas, total_vias, lista_vias
 
 
 def verificar_equipamentos_proximos(df_selecionados: pd.DataFrame, df_equipamentos: pd.DataFrame, 
@@ -661,6 +700,39 @@ def carregar_bairros_geojson(filepath: Path) -> tuple:
     except Exception as e:
         return None, f"Erro: {str(e)}"
 
+def carregar_vias_prioritarias(filepath: Path) -> tuple:
+    """Carrega o Excel de vias prioritárias"""
+    try:
+        if not filepath.exists():
+            return None, f"Arquivo não encontrado: {filepath}"
+        
+        df = pd.read_excel(filepath, header=0)
+        
+        col_map = {}
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            if 'logradouro' in col_lower or 'log' in col_lower or 'rua' in col_lower or 'via' in col_lower:
+                col_map['logradouro'] = col
+            elif 'prioridade' in col_lower or 'peso' in col_lower or 'nota' in col_lower:
+                col_map['prioridade'] = col
+            elif 'id' in col_lower:
+                col_map['id'] = col
+        
+        if 'logradouro' not in col_map:
+            return None, "Coluna 'LOGRADOURO' é obrigatória."
+        
+        vias = pd.DataFrame({
+            'id': df[col_map['id']].astype(str) if 'id' in col_map else df[col_map['logradouro']].astype(str),
+            'logradouro': df[col_map['logradouro']].astype(str),
+            'prioridade': pd.to_numeric(df[col_map.get('prioridade', df.columns[0])], errors='coerce').fillna(5).astype(int) if 'prioridade' in col_map else 5
+        })
+        
+        vias['logradouro'] = vias['logradouro'].str.strip().str.upper()
+        
+        return vias, f"✓ {len(vias)} vias prioritárias carregadas"
+    except Exception as e:
+        return None, f"Erro: {str(e)}"
+
 
 def carregar_arquivos_locais():
     """Carrega todos os arquivos locais na inicialização"""
@@ -685,6 +757,10 @@ def carregar_arquivos_locais():
     if sinist is not None:
         st.session_state.sinistros = sinist
     
+    vias_prior, msg = carregar_vias_prioritarias(ARQUIVO_VIAS_PRIORITARIAS)
+    if vias_prior is not None:
+        st.session_state.vias_prioritarias = vias_prior
+
     if ARQUIVO_BAIRROS.exists():
         geojson_data, msg = carregar_bairros_geojson(ARQUIVO_BAIRROS)
         if geojson_data is not None:
@@ -1020,7 +1096,7 @@ def criar_mapa(cruzamentos_selecionados: pd.DataFrame, equipamentos: pd.DataFram
                 <b>Prioridade:</b> {p.get('prioridade', 'N/A')}
             </div>"""
             folium.CircleMarker(
-                location=[p['lat'], p['lon']], radius=5, color="#f6443b",
+                location=[p['lat'], p['lon']], radius=3, color="#f6443b",
                 fill=True, fillColor="#f6443b", fillOpacity=0.8, weight=2,
                 popup=folium.Popup(popup_html, max_width=250)
             ).add_to(m)
@@ -1035,7 +1111,7 @@ def criar_mapa(cruzamentos_selecionados: pd.DataFrame, equipamentos: pd.DataFram
                 <b>Cobertura:</b> {c['cobertura_acum']*100:.2f}%
             </div>"""
             folium.CircleMarker(
-                location=[c['lat'], c['lon']], radius=5, color="#3b82f6",
+                location=[c['lat'], c['lon']], radius=3, color="#3b82f6",
                 fill=True, fillColor="#3b82f6", fillOpacity=0.8, weight=1,
                 popup=folium.Popup(popup_html, max_width=250)
             ).add_to(m)
@@ -1106,8 +1182,13 @@ with st.sidebar:
     else:
         status_html += '<div class="stat-row"><span>✗ Sinistros:</span><span style="color:#ef4444;">Não carregado</span></div>'
     
-    if st.session_state.bairros_geojson is not None:
-        status_html += '<div class="stat-row"><span>✓ Bairros:</span><span class="stat-value">Carregado</span></div>'
+    if not st.session_state.vias_prioritarias.empty:
+        status_html += f'<div class="stat-row"><span>✓ Vias Prioritárias:</span><span class="stat-value">{len(st.session_state.vias_prioritarias)} vias</span></div>'
+    else:
+        status_html += '<div class="stat-row"><span>✗ Vias Prioritárias:</span><span style="color:#ef4444;">Não carregado</span></div>'
+
+    # if st.session_state.bairros_geojson is not None:
+    #     status_html += '<div class="stat-row"><span>✓ Bairros:</span><span class="stat-value">Carregado</span></div>'
     
     status_html += '</div>'
     st.markdown(status_html, unsafe_allow_html=True)
@@ -1166,6 +1247,7 @@ with st.sidebar:
     # st.markdown('<div class="section-title">3b. Raio de cobertura das cameras</div>', unsafe_allow_html=True)
     # raio_cobertura = st.slider("Raio (m)",50, 250, 50, step=50, key='raio_cobertura')
     raio_cobertura=50
+    raio_equipamento=100
     
     # st.markdown('<div class="section-title">4. Limite de cobertura por logradouro</div>', unsafe_allow_html=True)
     # usar_limite_log = st.checkbox("Limitar cobertura por rua", value=False, key='usar_limite_log',
@@ -1396,7 +1478,13 @@ with col_stats:
         )
         pct_sinistros = (qtd_sinistros_cobertos / total_sinistros * 100) if total_sinistros > 0 else 0
 
-        
+        df_cobertos = df_calc[df_calc['id'].isin(ids_cobertos)]
+        qtd_vias_cobertas, total_vias, vias_prioritarias_cobertas = verificar_vias_prioritarias_por_logradouro(
+            df_cobertos,
+            st.session_state.vias_prioritarias
+        )
+        pct_vias_prioritarias = (qtd_vias_cobertas / total_vias * 100) if total_vias > 0 else 0        
+
         # EXIBIR ESTATÍSTICAS
         st.markdown("#### 📊 Pontos e Câmeras")
         
@@ -1434,6 +1522,7 @@ with col_stats:
             <div class="stat-row"><span>Comercial:</span><span class="stat-value">{pct_comercial:.1f}%</span></div>
             <div class="stat-row"><span>Alagamentos:</span><span class="stat-value">{pct_alagamentos:.1f}%</span></div>
             <div class="stat-row"><span>Sinistros:</span><span class="stat-value">{pct_sinistros:.1f}% ({qtd_sinistros_cobertos}/{total_sinistros})</span></div>
+            <div class="stat-row"><span>Vias Prioritárias:</span><span class="stat-value">{pct_vias_prioritarias:.1f}% ({qtd_vias_cobertas}/{total_vias})</span></div>
         </div>""", unsafe_allow_html=True)
 
         st.markdown("#### 📈 Cobertura de Risco IPE")
@@ -1477,7 +1566,7 @@ with col_stats:
 # ============================================================
 st.markdown("---")
 
-col_equip_lct, col_equip_com, col_alag, col_sinist = st.columns(4)
+col_equip_lct, col_equip_com, col_alag, col_sinist, col_vias = st.columns(5)
 
 with col_equip_lct:
     if not st.session_state.equipamentos.empty and not st.session_state.cruzamentos_calculados.empty:
@@ -1694,4 +1783,41 @@ with col_sinist:
         </div>""", unsafe_allow_html=True)
     else:
         st.markdown("#### 🚗 Sinistros")
+        st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
+
+with col_vias:
+    if not st.session_state.cruzamentos_calculados.empty and not st.session_state.vias_prioritarias.empty:
+        df_todos_cobertos = st.session_state.cruzamentos_calculados[
+            st.session_state.cruzamentos_calculados['id'].isin(ids_cobertos)
+        ]
+        
+        qtd_vias_cobertas, total_vias, vias_encontradas = verificar_vias_prioritarias_por_logradouro(
+            df_todos_cobertos,
+            st.session_state.vias_prioritarias
+        )
+        
+        pct_vias = (qtd_vias_cobertas / total_vias * 100) if total_vias > 0 else 0
+        
+        html_vias = ""
+        if vias_encontradas:
+            for via, prioridade in vias_encontradas[:20]:  # Limitar a 20 vias
+                via_display = via if len(via) <= 50 else via[:47] + "..."
+                html_vias += f'<div class="stat-row" style="justify-content: space-between;"><span style="color:#93c5fd; font-size: 0.7rem;">🛣️ {via_display}</span><span class="stat-value" style="font-size: 0.7rem;"></div>'
+        else:
+            html_vias = '<div class="stat-row"><span>Nenhuma via prioritária coberta.</span></div>'
+        
+        st.markdown("#### 🛣️ Vias Priorit.")
+        st.markdown(f"""<div class="stat-box">
+            <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
+                <span><b>Cobertura:</b></span><span class="stat-value">{qtd_vias_cobertas}/{total_vias} ({pct_vias:.1f}%)</span>
+            </div>
+            <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
+                Vias prioritárias cobertas por câmeras.
+            </div>
+            <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
+                {html_vias}
+            </div>
+        </div>""", unsafe_allow_html=True)
+    else:
+        st.markdown("#### 🛣️ Vias Priorit.")
         st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
