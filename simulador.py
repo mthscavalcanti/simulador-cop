@@ -11,7 +11,7 @@ from pathlib import Path
 # CONFIGURAÇÃO DA PÁGINA
 # ============================================================
 st.set_page_config(
-    page_title="Otimizador do Videomonitoramento – Recife",
+    page_title="Otimizador do Videomonitoramento – COP Recife",
     page_icon="📍",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -1157,24 +1157,25 @@ with st.sidebar:
     
     status_html = '<div class="stat-box">'
     if not st.session_state.logs.empty:
-        status_html += f'<div class="stat-row"><span>✓ Cruzamentos:</span><span class="stat-value">{len(st.session_state.cruzamentos)}</span></div>'
+        status_html += f'<div class="stat-row"><span>✓ Total de pontos:</span><span class="stat-value">{len(st.session_state.cruzamentos)}</span></div>'
     else:
-        status_html += '<div class="stat-row"><span>✗ Cruzamentos:</span><span style="color:#ef4444;">Não carregado</span></div>'
+        status_html += '<div class="stat-row"><span>✗ Total de pontos:</span><span style="color:#ef4444;">Não carregado</span></div>'
     
     if not st.session_state.pontos_minimos.empty:
-        status_html += f'<div class="stat-row"><span>✓ Prioridades:</span><span class="stat-value">{len(st.session_state.pontos_minimos)}</span></div>'
+        status_html += f'<div class="stat-row"><span>✓ Pontos mínimos:</span><span class="stat-value">{len(st.session_state.pontos_minimos)}</span></div>'
     else:
-        status_html += '<div class="stat-row"><span>✗ Prioridades:</span><span style="color:#ef4444;">Não carregado</span></div>'
+        status_html += '<div class="stat-row"><span>✗ Pontos mínimos:</span><span style="color:#ef4444;">Não carregado</span></div>'
     
     if not st.session_state.equipamentos.empty:
-        status_html += f'<div class="stat-row"><span>✓ Equipamentos:</span><span class="stat-value">{len(st.session_state.equipamentos)}</span></div>'
+        # status_html += f'<div class="stat-row"><span>✓ Principais equipamentos:</span><span class="stat-value">{len(st.session_state.equipamentos)}</span></div>'
+        status_html += f'<div class="stat-row"><span>✓ Principais equipamentos:</span><span class="stat-value">118</span></div>'
     else:
-        status_html += '<div class="stat-row"><span>✗ Equipamentos:</span><span style="color:#ef4444;">Não carregado</span></div>'
+        status_html += '<div class="stat-row"><span>✗ Principais equipamentos:</span><span style="color:#ef4444;">Não carregado</span></div>'
     
     if not st.session_state.alagamentos.empty:
-        status_html += f'<div class="stat-row"><span>✓ Alagamentos:</span><span class="stat-value">{len(st.session_state.alagamentos)}</span></div>'
+        status_html += f'<div class="stat-row"><span>✓ Pontos de Alagamentos:</span><span class="stat-value">{len(st.session_state.alagamentos)}</span></div>'
     else:
-        status_html += '<div class="stat-row"><span>✗ Alagamentos:</span><span style="color:#ef4444;">Não carregado</span></div>'
+        status_html += '<div class="stat-row"><span>✗ Pontos de Alagamentos:</span><span style="color:#ef4444;">Não carregado</span></div>'
     
     if not st.session_state.sinistros.empty:
         total_sinistros_carregados = st.session_state.sinistros['qtd'].sum()
@@ -1242,7 +1243,7 @@ with st.sidebar:
     # ===== FIM AJUSTE 1 E 2 =====
     
     st.markdown('<div class="section-title">2. Distancia minima entre câmeras</div>', unsafe_allow_html=True)
-    dist_min = st.slider("Distancia (m)", 50, 500, 300, step=50, key='dist_min', help="Distancia minima entre câmeras que compartilham o mesmo logradouro")
+    dist_min = st.slider("Distancia (m)", 200, 500, 300, step=100, key='dist_min', help="Distancia minima entre câmeras que compartilham o mesmo logradouro")
     
     # st.markdown('<div class="section-title">3b. Raio de cobertura das cameras</div>', unsafe_allow_html=True)
     # raio_cobertura = st.slider("Raio (m)",50, 250, 50, step=50, key='raio_cobertura')
@@ -1264,7 +1265,7 @@ with st.sidebar:
     
     st.markdown('<div class="section-title">3. Pesos dos eixos IPE</div>', unsafe_allow_html=True)
     peso_seg = st.slider("Seguranca", 0, 100, 15, key='peso_seg')
-    peso_lct = st.slider("LCT", 0, 100, 30, key='peso_lct')
+    peso_lct = st.slider("Lazer, Cultura e Turismo", 0, 100, 30, key='peso_lct')
     peso_com = st.slider("Comercial", 0, 100, 15, key='peso_com')
     peso_mob = st.slider("Mobilidade", 0, 100, 40, key='peso_mob')
     
@@ -1610,7 +1611,7 @@ with col_equip_lct:
                     <span><b>Cobertura:</b></span><span class="stat-value">{total_lct_seg} ({pct_lct_seg:.1f}%)</span>
                 </div>
                 <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
-                    Calculado sobre {total_equipamentos_lct_seg} equipamentos mapeados.
+                    {total_equipamentos_lct_seg} equipamentos totais mapeados.
                 </div>
                 <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
                     {html_main}
@@ -1623,7 +1624,7 @@ with col_equip_lct:
                     <span><b>Cobertura:</b></span><span class="stat-value">0 (0.0%)</span>
                 </div>
                 <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
-                    Calculado sobre {total_equipamentos_lct_seg} equipamentos mapeados.
+                    {total_equipamentos_lct_seg} equipamentos totais mapeados.
                 </div>
                 <div class="stat-row"><span>Nenhum equipamento LCT/SEG próximo.</span></div>
             </div>""", unsafe_allow_html=True)
@@ -1673,7 +1674,7 @@ with col_equip_com:
                     <span><b>Cobertura:</b></span><span class="stat-value">{total_com} ({pct_com:.1f}%)</span>
                 </div>
                 <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
-                    Calculado sobre {total_equipamentos_com} equipamentos mapeados.
+                    {total_equipamentos_com} equipamentos totais mapeados.
                 </div>
                 <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
                     {html_com}
@@ -1686,7 +1687,7 @@ with col_equip_com:
                     <span><b>Cobertura:</b></span><span class="stat-value">0 (0.0%)</span>
                 </div>
                 <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
-                    Calculado sobre {total_equipamentos_com} equipamentos mapeados.
+                    {total_equipamentos_com} equipamentos totais mapeados.
                 </div>
                 <div class="stat-row"><span>Nenhum equipamento Comercial próximo.</span></div>
             </div>""", unsafe_allow_html=True)
@@ -1717,9 +1718,19 @@ with col_alag:
         
         html_alagamentos = ""
         if alagamentos_encontrados:
-            for alag in alagamentos_encontrados:
-                alag_display = alag if len(alag) <= 60 else alag[:57] + "..."
-                html_alagamentos += f'<div class="stat-row" style="justify-content: flex-start;"><span style="color:#fbbf24; font-size: 0.7rem;">⚠️ {alag_display}</span></div>'
+            # Agrupar e contar alagamentos por nome
+            from collections import Counter
+            alagamentos_agrupados = Counter(alagamentos_encontrados)
+            
+            # Ordenar por quantidade (decrescente) e depois por nome
+            alagamentos_ordenados = sorted(
+                alagamentos_agrupados.items(), 
+                key=lambda x: (-x[1], x[0])
+            )
+            
+            for alag_nome, qtd in alagamentos_ordenados:
+                alag_display = alag_nome if len(alag_nome) <= 50 else alag_nome[:47] + "..."
+                html_alagamentos += f'<div class="stat-row" style="justify-content: space-between;"><span style="color:#fbbf24; font-size: 0.7rem;">⚠️ {alag_display}</span><span class="stat-value" style="font-size: 0.7rem;">{qtd}</span></div>'
         else:
             html_alagamentos = '<div class="stat-row"><span>Nenhum ponto de alagamento.</span></div>'
         
@@ -1729,7 +1740,7 @@ with col_alag:
                 <span><b>Cobertura:</b></span><span class="stat-value">{qtd_alag} ({pct_alag:.1f}%)</span>
             </div>
             <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
-                Calculado sobre {total_alvos_alagamento} pontos mapeados.
+                {total_alvos_alagamento} pontos totais mapeados.
             </div>
             <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
                 {html_alagamentos}
@@ -1738,6 +1749,7 @@ with col_alag:
     else:
         st.markdown("#### 🌊 Alagamentos")
         st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
+
 
 with col_sinist:
     if not st.session_state.cruzamentos_calculados.empty and not st.session_state.sinistros.empty:
