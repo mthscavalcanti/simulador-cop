@@ -34,6 +34,8 @@ ARQUIVO_VIAS_PRIORITARIAS = DATA_DIR / "Vias Prioritarias.xlsx"
 # ============================================================
 st.markdown("""
 <style>
+    .stApp { background-color: #0e1117 !important; color: #e6eef8 !important; }
+    .stSidebar { background-color: #0b0e13 !important; }
     .block-container {
         padding-top: 1rem;
         padding-bottom: 0rem;
