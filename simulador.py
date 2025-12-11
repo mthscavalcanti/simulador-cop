@@ -1231,7 +1231,7 @@ with st.sidebar:
         max_cameras = st.number_input(
             "Máximo de câmeras", 
             min_value=250,  # ← AJUSTE 2: LIMITE MÍNIMO
-            max_value=2500, 
+            max_value=4500, 
             value=500, 
             step=10, 
             key='max_cameras',
@@ -1530,13 +1530,60 @@ with col_stats:
         </div>""", unsafe_allow_html=True)
 
         st.markdown("#### 📈 Cobertura Risco IPE")
-        st.markdown(f"""<div class="stat-box">
-            <div class="stat-row"<span>Cobertura de risco IPE:</span><span class="stat-value" style="color: #4ade80;">{cobertura_ajustada_total:.1f}%</span></div>
-            <div class="stat-row"><span>Seguranca:</span><span class="stat-value">{cobertura_ajustada_eixos['seg']:.1f}%</span></div>
-            <div class="stat-row"><span>Lazer, Cultura e Turismo:</span><span class="stat-value">{cobertura_ajustada_eixos['lct']:.1f}%</span></div>
-            <div class="stat-row"><span>Comercial:</span><span class="stat-value">{cobertura_ajustada_eixos['com']:.1f}%</span></div>
-            <div class="stat-row"><span>Mobilidade:</span><span class="stat-value">{cobertura_ajustada_eixos['mob']:.1f}%</span></div>
-        </div>""", unsafe_allow_html=True)
+
+        st.markdown("""
+        <style>
+        .tooltip {
+        position: relative;
+        display: inline-block;
+        cursor: help;
+        }
+        .tooltip .tooltiptext {
+        visibility: hidden;
+        width: 260px;
+        background-color: #1f2937;
+        color: #f9fafb;
+        text-align: left;
+        border-radius: 8px;
+        padding: 10px;
+        position: absolute;
+        z-index: 1;
+        bottom: 125%;
+        left: 50%;
+        transform: translateX(-50%);
+        opacity: 0;
+        transition: opacity 0.3s;
+        font-size: 0.8rem;
+        }
+        .tooltip:hover .tooltiptext {
+        visibility: visible;
+        opacity: 1;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        st.markdown(f"""
+        <div class="stat-box">
+        <div class="stat-row">
+        <span>
+        Cobertura de risco otimizada (via 50%)
+        <span class="tooltip"> 🛈
+        <span class="tooltiptext">
+        A cobertura de risco otimizada adota o critério de que, uma vez que uma rua atinja 50% de cobertura do seu risco, ela passa a ser considerada como totalmente coberta (100%). Por conta dessa lógica, diferentes cenários com quantidades distintas de câmeras podem resultar em níveis idênticos de cobertura. Isso ocorre porque câmeras adicionais podem estar sendo alocadas justamente em ruas que já ultrapassaram o limiar de 50% de cobertura, não gerando aumento efetivo no indicador final.
+        </span>
+        </span>
+        </span>
+        <span class="stat-value" style="color: #4ade80;">{cobertura_ajustada_total:.1f}%</span>
+        </div>
+        <div class="stat-row"><span>Segurança:</span><span class="stat-value">{cobertura_ajustada_eixos['seg']:.1f}%</span></div>
+        <div class="stat-row"><span>Lazer, Cultura e Turismo:</span><span class="stat-value">{cobertura_ajustada_eixos['lct']:.1f}%</span></div>
+        <div class="stat-row"><span>Comercial:</span><span class="stat-value">{cobertura_ajustada_eixos['com']:.1f}%</span></div>
+        <div class="stat-row"><span>Mobilidade:</span><span class="stat-value">{cobertura_ajustada_eixos['mob']:.1f}%</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+
 
         # st.markdown("#### 🎯 Cobertura por Logradouro (Ajustada)")
         # qtd_100 = cobertura_ajustada_eixos.get('qtd_100', 0)
