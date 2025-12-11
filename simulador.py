@@ -1217,7 +1217,7 @@ with st.sidebar:
         # AJUSTE 1: Filtro de Cobertura Alvo Efetiva IPE
         cobertura_pct = st.slider(
             "Cobertura alvo efetiva IPE (%)", 
-            0, 100, 80, step=5, 
+            0, 100, 80, step=10, 
             key='cobertura_alvo',
             help="Percentual de cobertura efetiva do IPE a ser atingido"
         )
@@ -1325,7 +1325,7 @@ if not st.session_state.cruzamentos_calculados.empty and ids_cobertos:
 # ============================================================
 # AREA PRINCIPAL - MAPA E RESUMOS
 # ============================================================
-st.markdown('<h1 class="main-header">Otimizador do Videomonitoramento - Recife</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">Otimizador do Videomonitoramento - COP Recife</h1>', unsafe_allow_html=True)
 
 if not st.session_state.cruzamentos_calculados.empty and not alvo_atingido and max_cruzamentos is None and max_cameras is None:
     restricoes_ativas = []
@@ -1502,6 +1502,7 @@ with col_stats:
             <div class="stat-row"><span>Pontos otimizados:</span><span class="stat-value">{qtd_pontos_ipe:,} pts ({int(cameras_pontos_ipe)} câm)</span></div>
             <div class="stat-row"><span><b>Total de pontos:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_pontos:,}</span></div>
             <div class="stat-row"><span><b>Total de câmeras:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_cameras:,}</span></div>
+            <div class="stat-row"><span><b>Câmeras por 10 mil hab.:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_cameras/158.8376:.0f}</span></div>
             <div class="stat-row" style="margin-top: 5px; font-size: 1rem;"><span><b>Custo Total:</b></span><span class="stat-value" style="color: #4ade80;">{custo_formatado}</span></div>"""
         
         # stats_html += f"""</div>
@@ -1519,16 +1520,16 @@ with col_stats:
         
         st.markdown(stats_html, unsafe_allow_html=True)
 
-        st.markdown("#### 🏙️ Cobertura da Cidade")
+        st.markdown("#### 🏙️ Cobertura Pontos Prioritários")
         st.markdown(f"""<div class="stat-box">
-            <div class="stat-row"><span>Equipamentos:</span><span class="stat-value">{pct_equipamentos:.1f}%</span></div>
-            <div class="stat-row"><span>Comercial:</span><span class="stat-value">{pct_comercial:.1f}%</span></div>
-            <div class="stat-row"><span>Alagamentos:</span><span class="stat-value">{pct_alagamentos:.1f}%</span></div>
-            <div class="stat-row"><span>Sinistros:</span><span class="stat-value">{pct_sinistros:.1f}% ({qtd_sinistros_cobertos}/{total_sinistros})</span></div>
+            <div class="stat-row"><span>Parques, Praças, Teatros, etc:</span><span class="stat-value">{pct_equipamentos:.1f}%</span></div>
+            <div class="stat-row"><span>Mercados e Feiras:</span><span class="stat-value">{pct_comercial:.1f}%</span></div>
+            <div class="stat-row"><span>Pontos de Alagamentos:</span><span class="stat-value">{pct_alagamentos:.1f}%</span></div>
+            <div class="stat-row"><span>Pontos de Sinistros:</span><span class="stat-value">{pct_sinistros:.1f}% ({qtd_sinistros_cobertos}/{total_sinistros})</span></div>
             <div class="stat-row"><span>Vias Prioritárias:</span><span class="stat-value">{pct_vias_prioritarias:.1f}% ({qtd_vias_cobertas}/{total_vias})</span></div>
         </div>""", unsafe_allow_html=True)
 
-        st.markdown("#### 📈 Cobertura de Risco IPE")
+        st.markdown("#### 📈 Cobertura Risco IPE")
         st.markdown(f"""<div class="stat-box">
             <div class="stat-row"<span>Cobertura de risco IPE:</span><span class="stat-value" style="color: #4ade80;">{cobertura_ajustada_total:.1f}%</span></div>
             <div class="stat-row"><span>Seguranca:</span><span class="stat-value">{cobertura_ajustada_eixos['seg']:.1f}%</span></div>
