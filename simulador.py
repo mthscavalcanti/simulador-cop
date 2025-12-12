@@ -2016,7 +2016,7 @@ with col_vias:
         else:
             html_vias = '<div class="stat-row"><span>Nenhuma via prioritária coberta.</span></div>'
         
-        st.markdown("#### 🛣️ Vias Priorit.")
+        st.markdown("#### 🛣️ Vias Prioritárias")
         st.markdown(f"""<div class="stat-box">
             <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
                 <span><b>Cobertura:</b></span><span class="stat-value">{qtd_vias_cobertas}/{total_vias} ({pct_vias:.1f}%)</span>
@@ -2029,5 +2029,5 @@ with col_vias:
             </div>
         </div>""", unsafe_allow_html=True)
     else:
-        st.markdown("#### 🛣️ Vias Priorit.")
+        st.markdown("#### 🛣️ Vias Prioritárias")
         st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
