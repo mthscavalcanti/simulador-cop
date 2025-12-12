@@ -1166,7 +1166,7 @@ def criar_mapa(cruzamentos_selecionados: pd.DataFrame, equipamentos: pd.DataFram
         for _, p in pontos_minimos_usados.iterrows():
             popup_html = f"""<div style="font-size:0.8rem; min-width:180px;">
                 <strong>📍 PONTO OBRIGATÓRIO</strong><br/>
-                <b>Tipo:</b> {p.get('tipo', 'N/A')}<br/>
+                <b>Motivo:</b> {p.get('tipo', 'N/A')}<br/>
                 <b>Logradouro:</b> {p.get('logradouro', 'N/A')}<br/>
                 <b>Prioridade:</b> {p.get('prioridade', 'N/A')}
             </div>"""
@@ -1183,7 +1183,6 @@ def criar_mapa(cruzamentos_selecionados: pd.DataFrame, equipamentos: pd.DataFram
                 <strong>Cruzamento {int(c['id'])}</strong><br/>
                 <b>Ruas:</b> {c['log1']} x {c['log2']}<br/>
                 <b>IPE:</b> {c['ipe_cruz']:.4f}<br/>
-                <b>Cobertura:</b> {c['cobertura_acum']*100:.2f}%
             </div>"""
             folium.CircleMarker(
                 location=[c['lat'], c['lon']], radius=3, color="#3b82f6",
