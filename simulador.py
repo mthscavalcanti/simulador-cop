@@ -28,6 +28,7 @@ ARQUIVO_BAIRROS = DATA_DIR / "bairros.geojson"
 ARQUIVO_ALAGAMENTOS = DATA_DIR / "Alagamentos.xlsx"
 ARQUIVO_SINISTROS = DATA_DIR / "Sinistros.xlsx"
 ARQUIVO_VIAS_PRIORITARIAS = DATA_DIR / "Vias Prioritarias.xlsx"
+ARQUIVO_CVP = DATA_DIR / "CVP.xlsx"
 
 # ============================================================
 # CSS CUSTOMIZADO - Layout compacto
@@ -164,6 +165,8 @@ if 'sinistros' not in st.session_state:
     st.session_state.sinistros = pd.DataFrame()
 if 'vias_prioritarias' not in st.session_state:
     st.session_state.vias_prioritarias = pd.DataFrame()
+if 'cvp' not in st.session_state:  # ← ADICIONAR ESTAS LINHAS
+    st.session_state.cvp = pd.DataFrame()
 if 'arquivos_carregados' not in st.session_state:
     st.session_state.arquivos_carregados = False
 
@@ -415,6 +418,34 @@ def verificar_vias_prioritarias_por_logradouro(df_cruzamentos_selecionados: pd.D
     
     return qtd_vias_cobertas, total_vias, lista_vias
 
+def verificar_cvp_por_logradouro(df_cruzamentos_selecionados: pd.DataFrame, df_cvp: pd.DataFrame) -> tuple:
+    """Verifica quais logradouros com CVP têm cobertura de câmeras"""
+    if df_cruzamentos_selecionados.empty or df_cvp.empty:
+        return 0, 0, []
+    
+    cvp_dict = {}
+    for _, row in df_cvp.iterrows():
+        log_norm = str(row['logradouro']).strip().upper()
+        qtd = int(row.get('cvp', 0))
+        cvp_dict[log_norm] = qtd
+    
+    logradouros_cobertos = {}
+    
+    for _, cruz in df_cruzamentos_selecionados.iterrows():
+        log1 = str(cruz.get('log1', '')).strip().upper()
+        log2 = str(cruz.get('log2', '')).strip().upper()
+        
+        if log1 in cvp_dict and log1 not in logradouros_cobertos:
+            logradouros_cobertos[log1] = cvp_dict[log1]
+        
+        if log2 in cvp_dict and log2 not in logradouros_cobertos:
+            logradouros_cobertos[log2] = cvp_dict[log2]
+    
+    qtd_cvp_cobertos = sum(logradouros_cobertos.values())
+    total_cvp = sum(cvp_dict.values())
+    lista_logradouros = list(logradouros_cobertos.keys())
+    
+    return qtd_cvp_cobertos, total_cvp, lista_logradouros
 
 def verificar_equipamentos_proximos(df_selecionados: pd.DataFrame, df_equipamentos: pd.DataFrame, 
                                      raio_camera: float = 50, nota_min: int = 4, eixos: list = None,
@@ -735,6 +766,44 @@ def carregar_vias_prioritarias(filepath: Path) -> tuple:
     except Exception as e:
         return None, f"Erro: {str(e)}"
 
+def carregar_cvp(filepath: Path) -> tuple:
+    """Carrega o Excel de CVP (Crimes Contra o Patrimônio) por logradouro"""
+    try:
+        if not filepath.exists():
+            return None, f"Arquivo não encontrado: {filepath}"
+        
+        df = pd.read_excel(filepath, header=0)
+        
+        col_map = {}
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            if 'logradouro' in col_lower or 'log' in col_lower or 'rua' in col_lower:
+                col_map['logradouro'] = col
+            elif 'cvp' in col_lower or 'crime' in col_lower or 'patrimonio' in col_lower or 'patrimônio' in col_lower:
+                col_map['cvp'] = col
+            elif 'id' in col_lower:
+                col_map['id'] = col
+        
+        if 'logradouro' not in col_map:
+            return None, "Coluna 'LOGRADOURO' é obrigatória."
+        
+        if 'cvp' not in col_map:
+            return None, "Coluna 'CVP' é obrigatória."
+        
+        cvp_data = pd.DataFrame({
+            'id': df[col_map['id']].astype(str) if 'id' in col_map else df[col_map['logradouro']].astype(str),
+            'logradouro': df[col_map['logradouro']].astype(str),
+            'cvp': pd.to_numeric(df[col_map['cvp']], errors='coerce').fillna(0).astype(int)
+        })
+        
+        cvp_data['logradouro'] = cvp_data['logradouro'].str.strip().str.upper()
+        
+        # Remover registros com CVP = 0
+        cvp_data = cvp_data[cvp_data['cvp'] > 0]
+        
+        return cvp_data, f"✓ {len(cvp_data)} logradouros com CVP carregados"
+    except Exception as e:
+        return None, f"Erro: {str(e)}"
 
 def carregar_arquivos_locais():
     """Carrega todos os arquivos locais na inicialização"""
@@ -762,6 +831,10 @@ def carregar_arquivos_locais():
     vias_prior, msg = carregar_vias_prioritarias(ARQUIVO_VIAS_PRIORITARIAS)
     if vias_prior is not None:
         st.session_state.vias_prioritarias = vias_prior
+
+    cvp_data, msg = carregar_cvp(ARQUIVO_CVP)
+    if cvp_data is not None:
+        st.session_state.cvp = cvp_data
 
     if ARQUIVO_BAIRROS.exists():
         geojson_data, msg = carregar_bairros_geojson(ARQUIVO_BAIRROS)
@@ -1155,46 +1228,46 @@ if not st.session_state.arquivos_carregados:
 with st.sidebar:
     st.markdown("## 🎛️ Controles")
     
-    st.markdown('<div class="section-title">📁 Estatísticas gerais</div>', unsafe_allow_html=True)
+    # st.markdown('<div class="section-title">📁 Estatísticas gerais</div>', unsafe_allow_html=True)
     
-    status_html = '<div class="stat-box">'
-    if not st.session_state.logs.empty:
-        status_html += f'<div class="stat-row"><span>✓ Total de pontos:</span><span class="stat-value">{len(st.session_state.cruzamentos)}</span></div>'
-    else:
-        status_html += '<div class="stat-row"><span>✗ Total de pontos:</span><span style="color:#ef4444;">Não carregado</span></div>'
+    # status_html = '<div class="stat-box">'
+    # if not st.session_state.logs.empty:
+    #     status_html += f'<div class="stat-row"><span>✓ Total de pontos:</span><span class="stat-value">{len(st.session_state.cruzamentos)}</span></div>'
+    # else:
+    #     status_html += '<div class="stat-row"><span>✗ Total de pontos:</span><span style="color:#ef4444;">Não carregado</span></div>'
     
-    if not st.session_state.pontos_minimos.empty:
-        status_html += f'<div class="stat-row"><span>✓ Pontos mínimos:</span><span class="stat-value">{len(st.session_state.pontos_minimos)}</span></div>'
-    else:
-        status_html += '<div class="stat-row"><span>✗ Pontos mínimos:</span><span style="color:#ef4444;">Não carregado</span></div>'
+    # if not st.session_state.pontos_minimos.empty:
+    #     status_html += f'<div class="stat-row"><span>✓ Pontos mínimos obrigatórios - COP:</span><span class="stat-value">{len(st.session_state.pontos_minimos)}</span></div>'
+    # else:
+    #     status_html += '<div class="stat-row"><span>✗ Pontos mínimos:</span><span style="color:#ef4444;">Não carregado</span></div>'
     
-    if not st.session_state.equipamentos.empty:
-        # status_html += f'<div class="stat-row"><span>✓ Principais equipamentos:</span><span class="stat-value">{len(st.session_state.equipamentos)}</span></div>'
-        status_html += f'<div class="stat-row"><span>✓ Principais equipamentos:</span><span class="stat-value">118</span></div>'
-    else:
-        status_html += '<div class="stat-row"><span>✗ Principais equipamentos:</span><span style="color:#ef4444;">Não carregado</span></div>'
+    # if not st.session_state.equipamentos.empty:
+    #     # status_html += f'<div class="stat-row"><span>✓ Principais equipamentos:</span><span class="stat-value">{len(st.session_state.equipamentos)}</span></div>'
+    #     status_html += f'<div class="stat-row"><span>✓ Principais equipamentos:</span><span class="stat-value">118</span></div>'
+    # else:
+    #     status_html += '<div class="stat-row"><span>✗ Principais equipamentos:</span><span style="color:#ef4444;">Não carregado</span></div>'
     
-    if not st.session_state.alagamentos.empty:
-        status_html += f'<div class="stat-row"><span>✓ Pontos de Alagamentos:</span><span class="stat-value">{len(st.session_state.alagamentos)}</span></div>'
-    else:
-        status_html += '<div class="stat-row"><span>✗ Pontos de Alagamentos:</span><span style="color:#ef4444;">Não carregado</span></div>'
+    # if not st.session_state.alagamentos.empty:
+    #     status_html += f'<div class="stat-row"><span>✓ Pontos de Alagamentos:</span><span class="stat-value">{len(st.session_state.alagamentos)}</span></div>'
+    # else:
+    #     status_html += '<div class="stat-row"><span>✗ Pontos de Alagamentos:</span><span style="color:#ef4444;">Não carregado</span></div>'
     
-    if not st.session_state.sinistros.empty:
-        total_sinistros_carregados = st.session_state.sinistros['qtd'].sum()
-        status_html += f'<div class="stat-row"><span>✓ Sinistros:</span><span class="stat-value">{total_sinistros_carregados} em {len(st.session_state.sinistros)} ruas</span></div>'
-    else:
-        status_html += '<div class="stat-row"><span>✗ Sinistros:</span><span style="color:#ef4444;">Não carregado</span></div>'
+    # if not st.session_state.sinistros.empty:
+    #     total_sinistros_carregados = st.session_state.sinistros['qtd'].sum()
+    #     status_html += f'<div class="stat-row"><span>✓ Sinistros:</span><span class="stat-value">{total_sinistros_carregados} em {len(st.session_state.sinistros)} ruas</span></div>'
+    # else:
+    #     status_html += '<div class="stat-row"><span>✗ Sinistros:</span><span style="color:#ef4444;">Não carregado</span></div>'
     
-    if not st.session_state.vias_prioritarias.empty:
-        status_html += f'<div class="stat-row"><span>✓ Vias Prioritárias:</span><span class="stat-value">{len(st.session_state.vias_prioritarias)} vias</span></div>'
-    else:
-        status_html += '<div class="stat-row"><span>✗ Vias Prioritárias:</span><span style="color:#ef4444;">Não carregado</span></div>'
+    # if not st.session_state.vias_prioritarias.empty:
+    #     status_html += f'<div class="stat-row"><span>✓ Vias Prioritárias:</span><span class="stat-value">{len(st.session_state.vias_prioritarias)} vias</span></div>'
+    # else:
+    #     status_html += '<div class="stat-row"><span>✗ Vias Prioritárias:</span><span style="color:#ef4444;">Não carregado</span></div>'
 
     # if st.session_state.bairros_geojson is not None:
     #     status_html += '<div class="stat-row"><span>✓ Bairros:</span><span class="stat-value">Carregado</span></div>'
     
-    status_html += '</div>'
-    st.markdown(status_html, unsafe_allow_html=True)
+    # status_html += '</div>'
+    # st.markdown(status_html, unsafe_allow_html=True)
     
     # if st.button("🔄 Recarregar Arquivos", use_container_width=True):
     #     st.session_state.arquivos_carregados = False
@@ -1216,10 +1289,10 @@ with st.sidebar:
     if modo_limite == "Cobertura Alvo (%)":
         # AJUSTE 1: Filtro de Cobertura Alvo Efetiva IPE
         cobertura_pct = st.slider(
-            "Cobertura alvo efetiva IPE (%)", 
+            "Cobertura alvo de risco otimizada (via 50%)", 
             0, 100, 80, step=10, 
             key='cobertura_alvo',
-            help="Percentual de cobertura efetiva do IPE a ser atingido"
+            help="Percentual de cobertura otimizada do IPE a ser atingido"
         )
         max_cameras = None
         st.markdown(f'''<div class="info-box">
@@ -1326,6 +1399,20 @@ if not st.session_state.cruzamentos_calculados.empty and ids_cobertos:
 # AREA PRINCIPAL - MAPA E RESUMOS
 # ============================================================
 st.markdown('<h1 class="main-header">Otimizador do Videomonitoramento - COP Recife</h1>', unsafe_allow_html=True)
+
+if not st.session_state.cruzamentos_calculados.empty and not alvo_atingido and modo_limite == "Cobertura Alvo (%)":
+    st.markdown(f"""
+    <div style="background: rgba(234, 179, 8, 0.1); border-left: 4px solid #fbbf24; padding: 0.6rem 0.8rem; margin-bottom: 0.8rem; border-radius: 4px;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 1.2rem;">⚠️</span>
+            <div style="flex: 1; font-size: 0.8rem; color: #fef3c7; line-height: 1.4;">
+                <strong>Cobertura alvo de {cobertura_pct}% não atingida.</strong> 
+                Cenário com máximo de {total_cameras_usado:,} câmeras possível, considerando a restrição de distância mínima: {dist_min}m. 
+                <em>O cenário apresentado simula o número máximo de câmeras necessárias para atingir a cobertura desejada dentro da restrição de distância mínima definida. É possível que existam soluções com menos câmeras que alcancem a mesma cobertura, devido ao incremento marginal decrescente (cada nova câmera adiciona menos ganho de cobertura).</em>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 if not st.session_state.cruzamentos_calculados.empty and not alvo_atingido and max_cruzamentos is None and max_cameras is None:
     restricoes_ativas = []
@@ -1482,6 +1569,13 @@ with col_stats:
         pct_sinistros = (qtd_sinistros_cobertos / total_sinistros * 100) if total_sinistros > 0 else 0
 
         df_cobertos = df_calc[df_calc['id'].isin(ids_cobertos)]
+        qtd_cvp_cobertos, total_cvp, logradouros_cvp_cobertos = verificar_cvp_por_logradouro(
+            df_cobertos,
+            st.session_state.cvp
+        )
+        pct_cvp = (qtd_cvp_cobertos / total_cvp * 100) if total_cvp > 0 else 0
+
+        df_cobertos = df_calc[df_calc['id'].isin(ids_cobertos)]
         qtd_vias_cobertas, total_vias, vias_prioritarias_cobertas = verificar_vias_prioritarias_por_logradouro(
             df_cobertos,
             st.session_state.vias_prioritarias
@@ -1525,8 +1619,9 @@ with col_stats:
             <div class="stat-row"><span>Parques, Praças, Teatros, etc:</span><span class="stat-value">{pct_equipamentos:.1f}%</span></div>
             <div class="stat-row"><span>Mercados e Feiras:</span><span class="stat-value">{pct_comercial:.1f}%</span></div>
             <div class="stat-row"><span>Pontos de Alagamentos:</span><span class="stat-value">{pct_alagamentos:.1f}%</span></div>
-            <div class="stat-row"><span>Pontos de Sinistros:</span><span class="stat-value">{pct_sinistros:.1f}% ({qtd_sinistros_cobertos}/{total_sinistros})</span></div>
-            <div class="stat-row"><span>Vias Prioritárias:</span><span class="stat-value">{pct_vias_prioritarias:.1f}% ({qtd_vias_cobertas}/{total_vias})</span></div>
+            <div class="stat-row"><span>Pontos de Sinistros:</span><span class="stat-value">{pct_sinistros:.1f}%</span></div>
+            <div class="stat-row"><span>Crimes Contra Patrimônio:</span><span class="stat-value">{pct_cvp:.1f}%</span></div>
+            <div class="stat-row"><span>Vias Prioritárias:</span><span class="stat-value">{pct_vias_prioritarias:.1f}%</span></div>
         </div>""", unsafe_allow_html=True)
 
         st.markdown("#### 📈 Cobertura Risco IPE")
@@ -1617,7 +1712,9 @@ with col_stats:
 # ============================================================
 st.markdown("---")
 
-col_equip_lct, col_equip_com, col_alag, col_sinist, col_vias = st.columns(5)
+col_equip_lct, col_equip_com, col_alag = st.columns(3)
+
+col_sinist, col_cvp, col_vias = st.columns(3)
 
 with col_equip_lct:
     if not st.session_state.equipamentos.empty and not st.session_state.cruzamentos_calculados.empty:
@@ -1845,6 +1942,57 @@ with col_sinist:
         </div>""", unsafe_allow_html=True)
     else:
         st.markdown("#### 🚗 Sinistros")
+        st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
+
+with col_cvp:
+    if not st.session_state.cruzamentos_calculados.empty and not st.session_state.cvp.empty:
+        df_todos_cobertos = st.session_state.cruzamentos_calculados[
+            st.session_state.cruzamentos_calculados['id'].isin(ids_cobertos)
+        ]
+        
+        qtd_cvp_cobertos, total_cvp, logradouros_cvp_encontrados = verificar_cvp_por_logradouro(
+            df_todos_cobertos,
+            st.session_state.cvp
+        )
+        
+        qtd_ruas_cvp = len(logradouros_cvp_encontrados)
+        total_ruas_cvp = len(st.session_state.cvp)
+        pct_cvp = (qtd_cvp_cobertos / total_cvp * 100) if total_cvp > 0 else 0
+        
+        html_cvp = ""
+        if logradouros_cvp_encontrados:
+            cvp_dict = {}
+            for _, row in st.session_state.cvp.iterrows():
+                log_norm = str(row['logradouro']).strip().upper()
+                qtd = int(row.get('cvp', 0))
+                cvp_dict[log_norm] = qtd
+            
+            # Ordenar por quantidade de CVP (decrescente)
+            logradouros_ordenados = sorted(
+                [(rua, cvp_dict.get(rua, 0)) for rua in logradouros_cvp_encontrados],
+                key=lambda x: -x[1]
+            )
+            
+            for rua, qtd_cvp_nesta_rua in logradouros_ordenados[:20]:  # Limitar a 20 ruas
+                rua_display = rua if len(rua) <= 50 else rua[:47] + "..."
+                html_cvp += f'<div class="stat-row" style="justify-content: space-between;"><span style="color:#fca5a5; font-size: 0.7rem;">🚨 {rua_display}</span><span class="stat-value" style="font-size: 0.7rem;">{qtd_cvp_nesta_rua}</span></div>'
+        else:
+            html_cvp = '<div class="stat-row"><span>Nenhuma rua com CVP.</span></div>'
+        
+        st.markdown("#### 🚨 CVP")
+        st.markdown(f"""<div class="stat-box">
+            <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
+                <span><b>Cobertura:</b></span><span class="stat-value">{qtd_cvp_cobertos}/{total_cvp} ({pct_cvp:.1f}%)</span>
+            </div>
+            <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
+                {qtd_ruas_cvp} de {total_ruas_cvp} ruas cobertas.
+            </div>
+            <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
+                {html_cvp}
+            </div>
+        </div>""", unsafe_allow_html=True)
+    else:
+        st.markdown("#### 🚨 CVP")
         st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
 
 with col_vias:
