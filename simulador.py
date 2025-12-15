@@ -1372,21 +1372,57 @@ with st.sidebar:
         </div>''', unsafe_allow_html=True)
     else:
         cobertura_pct = 100
-        # Usar estado anterior do RED para definir mínimo
-        minimo_cameras = 357 if st.session_state.incluir_red_anterior else 250
         
-        max_cameras = st.number_input(
-            "Máximo de câmeras", 
-            min_value=minimo_cameras,  # ← DINÂMICO: 357 se RED ativo, 250 se não
-            max_value=4032, 
-            value=max(500, minimo_cameras),  # Garante que valor padrão >= mínimo
+        # ===== NOVO: DEFINIR CÂMERAS RED =====
+        cameras_red = 107
+        # ===== FIM NOVO =====
+        
+        # Usar estado anterior do RED para definir mínimo e máximo
+        if st.session_state.incluir_red_anterior:
+            minimo_cameras = 250  # Mínimo sem RED
+            maximo_cameras = 4032 - cameras_red  # Máximo descontando RED
+            valor_padrao = 500  # Padrão sem RED
+            help_text = f"Limite de câmeras ALÉM das {cameras_red} RED (50% dos pontos = 3 câm, 30% = 2 câm, 20% = 1 câm). Mínimo: {minimo_cameras} câmeras"
+        else:
+            minimo_cameras = 250
+            maximo_cameras = 4032
+            valor_padrao = 500
+            help_text = f"Limite total de câmeras no sistema (50% dos pontos = 3 câm, 30% = 2 câm, 20% = 1 câm). Mínimo: {minimo_cameras} câmeras"
+        
+        # ===== MODIFICADO: Input agora pergunta câmeras SEM contar RED =====
+        max_cameras_input = st.number_input(
+            "Máximo de câmeras",
+            min_value=minimo_cameras,
+            max_value=maximo_cameras,
+            value=valor_padrao,
             step=10, 
-            key='max_cameras',
-            help=f"Limite total de câmeras no sistema (50% dos pontos = 3 câm, 30% = 2 câm, 20% = 1 câm). Mínimo: {minimo_cameras} câmeras"
+            key='max_cameras_input',
+            help=help_text
         )
-    
-        st.markdown(f'''<div class="info-box">
-                ℹ️ Limite fixo de <b>{max_cameras}</b> câmeras (distribuição: 50% dos pontos com 3 câm, 30% com 2 câm, 20% com 1 câm)
+        
+        # ===== NOVO: CALCULAR max_cameras REAL =====
+        if st.session_state.incluir_red_anterior:
+            max_cameras = max_cameras_input + cameras_red  # Adiciona as 107 RED
+            total_display = max_cameras
+            cameras_otimizadas = max_cameras_input
+        else:
+            max_cameras = max_cameras_input  # Usa o valor direto
+            total_display = max_cameras
+            cameras_otimizadas = max_cameras
+        # ===== FIM NOVO =====
+        
+        # Mensagem dinâmica baseada em RED
+        if st.session_state.incluir_red_anterior:
+            st.markdown(f'''<div class="info-box">
+                ℹ️ <b>Total: {total_display} câmeras</b><br/>
+                • {cameras_red} câmeras de Relógios</span><br/>
+                • {cameras_otimizadas} câmeras otimizadas<br/>
+                <small>Distribuição das otimizadas: 50% dos pontos com 3 câm, 30% com 2 câm, 20% com 1 câm</small>
+            </div>''', unsafe_allow_html=True)
+        else:
+            st.markdown(f'''<div class="info-box">
+                ℹ️ Limite fixo de <b>{total_display} câmeras</b><br/>
+                <small>Distribuição: 50% dos pontos com 3 câm, 30% com 2 câm, 20% com 1 câm</small>
             </div>''', unsafe_allow_html=True)
     
     max_cruzamentos = None
@@ -1409,8 +1445,8 @@ with st.sidebar:
     )
     
     if incluir_red:
-        st.markdown("""<div class="info-box">
-            ℹ️ Câmeras de relógios digitais serão incluídas como <b>pontos mínimos prioritários</b> (1 câmera sem custo cada)
+        st.markdown(f"""<div class="info-box">
+            ℹ️ <b>{cameras_red} câmeras de relógios digitais</b> serão incluídas como pontos mínimos prioritários (sem custo)
         </div>""", unsafe_allow_html=True)
 
     # Recarregar pontos mínimos se checkbox mudou
