@@ -169,6 +169,8 @@ if 'cvp' not in st.session_state:  # ← ADICIONAR ESTAS LINHAS
     st.session_state.cvp = pd.DataFrame()
 if 'arquivos_carregados' not in st.session_state:
     st.session_state.arquivos_carregados = False
+if 'incluir_red_anterior' not in st.session_state:
+    st.session_state.incluir_red_anterior = False
 
 
 # ============================================================
@@ -607,7 +609,7 @@ def carregar_excel_equipamentos(filepath: Path) -> tuple:
         return None, f"Erro: {str(e)}"
 
 
-def carregar_pontos_minimos(filepath: Path) -> tuple:
+def carregar_pontos_minimos(filepath: Path, incluir_red: bool = False) -> tuple:
     """Carrega o Excel de pontos mínimos obrigatórios"""
     try:
         if not filepath.exists():
@@ -644,9 +646,23 @@ def carregar_pontos_minimos(filepath: Path) -> tuple:
             'cameras': pd.to_numeric(df[col_map.get('cameras', df.columns[0])], errors='coerce').fillna(1).astype(int) if 'cameras' in col_map else 1
         }).dropna(subset=['lat', 'lon'])
         
+        # ===== NOVO: FILTRAR PONTOS RED =====
+        if not incluir_red:
+            # Remove pontos RED se não estiverem incluídos
+            pontos = pontos[pontos['tipo'].str.strip().str.upper() != 'RED']
+        else:
+            # Adiciona coluna identificadora para pontos RED
+            pontos['is_red'] = pontos['tipo'].str.strip().str.upper() == 'RED'
+        # ===== FIM NOVO =====
+        
         pontos = pontos.sort_values('prioridade', ascending=True).reset_index(drop=True)
         
-        return pontos, f"✓ {len(pontos)} pontos mínimos carregados"
+        msg = f"✓ {len(pontos)} pontos mínimos carregados"
+        if incluir_red:
+            qtd_red = (pontos['tipo'].str.strip().str.upper() == 'RED').sum()
+            msg += f" ({qtd_red} RED)"
+        
+        return pontos, msg
     except Exception as e:
         return None, f"Erro: {str(e)}"
 
@@ -805,16 +821,18 @@ def carregar_cvp(filepath: Path) -> tuple:
     except Exception as e:
         return None, f"Erro: {str(e)}"
 
-def carregar_arquivos_locais():
+def carregar_arquivos_locais(incluir_red: bool = False):
     """Carrega todos os arquivos locais na inicialização"""
     logs, cruzamentos, msg = carregar_excel_cruzamentos(ARQUIVO_CRUZAMENTOS)
     if logs is not None:
         st.session_state.logs = logs
         st.session_state.cruzamentos = cruzamentos
     
-    pontos_min, msg = carregar_pontos_minimos(ARQUIVO_PRIORIDADES)
+    # ===== MODIFICADO: PASSAR PARÂMETRO incluir_red =====
+    pontos_min, msg = carregar_pontos_minimos(ARQUIVO_PRIORIDADES, incluir_red)
     if pontos_min is not None:
         st.session_state.pontos_minimos = pontos_min
+    # ===== FIM MODIFICADO =====
     
     equip, msg = carregar_excel_equipamentos(ARQUIVO_EQUIPAMENTOS)
     if equip is not None:
@@ -900,7 +918,8 @@ def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, m
                                        max_cruzamentos: int = None, raio_cobertura: float = 50,
                                        limite_cobertura_logradouro: float = None,
                                        pontos_minimos: pd.DataFrame = None,
-                                       max_cameras: int = None) -> tuple:
+                                       max_cameras: int = None,
+                                       logs: pd.DataFrame = None) -> tuple:  # ← ADICIONAR logs como parâmetro
     
     df_pontos_minimos_usados = pd.DataFrame()
     
@@ -910,6 +929,41 @@ def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, m
     ipe_total = df['ipe_cruz'].sum()
     if ipe_total <= 0:
         return pd.DataFrame(), 0.0, True, None, set(), df_pontos_minimos_usados, 0
+    
+    # ===== NOVO: Preparar dicionário de IPE total por logradouro =====
+    if logs is None or logs.empty:
+        # Fallback para comportamento antigo se logs não fornecido
+        usar_cobertura_ajustada = False
+    else:
+        usar_cobertura_ajustada = True
+        logs_dict = {}
+        for _, log in logs.iterrows():
+            cod_log = int(log['cod_log'])
+            logs_dict[cod_log] = {
+                'nome': log['nome'],
+                'seg': log['seg'],
+                'lct': log['lct'],
+                'com': log['com'],
+                'mob': log['mob']
+            }
+        
+        # Calcular IPE total por logradouro
+        ipe_total_por_log = {}
+        for _, cruz in df.iterrows():
+            cod1, cod2 = cruz['cod_log1'], cruz['cod_log2']
+            ipe = cruz['ipe_cruz']
+            
+            if cod1 not in ipe_total_por_log:
+                ipe_total_por_log[cod1] = 0
+            if cod2 not in ipe_total_por_log:
+                ipe_total_por_log[cod2] = 0
+            
+            ipe_total_por_log[cod1] += ipe
+            ipe_total_por_log[cod2] += ipe
+        
+        # IPE total global (soma do IPE de todos os logradouros)
+        ipe_total_geral = sum(ipe_total_por_log.values())
+    # ===== FIM NOVO =====
     
     ipe_por_logradouro = {}
     if limite_cobertura_logradouro is not None:
@@ -1034,6 +1088,49 @@ def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, m
                 cobertura_por_logradouro[cob_log2] = cobertura_por_logradouro.get(cob_log2, 0) + cob_ipe
                 processados.add(cob_id)
     
+    # ===== CORRIGIDO: Função com regra de 15% =====
+    def calcular_cobertura_ajustada_atual(ids_cobertos_atual):
+        if not usar_cobertura_ajustada:
+            # Fallback: cobertura simples
+            ipe_coberto = sum(cruz_por_id[cid]['ipe'] for cid in ids_cobertos_atual if cid in cruz_por_id)
+            return ipe_coberto / ipe_total
+        
+        # Calcular IPE coberto por logradouro
+        ipe_coberto_por_log = {}
+        for cruz_id in ids_cobertos_atual:
+            if cruz_id not in cruz_por_id:
+                continue
+            info = cruz_por_id[cruz_id]
+            ipe = info['ipe']
+            cod_log1, cod_log2 = info['cod_log1'], info['cod_log2']
+            
+            if cod_log1 not in ipe_coberto_por_log:
+                ipe_coberto_por_log[cod_log1] = 0
+            if cod_log2 not in ipe_coberto_por_log:
+                ipe_coberto_por_log[cod_log2] = 0
+            
+            ipe_coberto_por_log[cod_log1] += ipe
+            ipe_coberto_por_log[cod_log2] += ipe
+        
+        # Aplicar regra dos 15%
+        ipe_ajustado_total = 0
+        for cod_log, ipe_total_log in ipe_total_por_log.items():
+            if ipe_total_log <= 0:
+                continue
+            
+            ipe_coberto = ipe_coberto_por_log.get(cod_log, 0)
+            cobertura_efetiva = ipe_coberto / ipe_total_log
+            
+            if cobertura_efetiva >= 0.15:  # ← CORRIGIDO: 15% ao invés de 50%
+                # Logradouro com ≥15% → conta como 100%
+                ipe_ajustado_total += ipe_total_log
+            else:
+                # Logradouro com <15% → mantém cobertura atual
+                ipe_ajustado_total += ipe_coberto
+        
+        return ipe_ajustado_total / ipe_total_geral if ipe_total_geral > 0 else 0
+    # ===== FIM CORRIGIDO =====
+    
     def calcular_cameras_por_ponto(indice_ponto: int) -> int:
         posicao_percent = (indice_ponto % 100)
         if posicao_percent < 50:
@@ -1065,6 +1162,10 @@ def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, m
             total_cameras += cameras_deste_ponto
             total_pontos += 1
             
+            # ===== NOVO: PRESERVAR FLAG is_red =====
+            is_red = ponto.get('is_red', False)
+            # ===== FIM NOVO =====
+            
             pontos_minimos_usados.append({
                 'id_minimo': ponto.get('id_minimo', len(pontos_minimos_usados) + 1),
                 'tipo': ponto.get('tipo', 'PONTO_MINIMO'),
@@ -1073,7 +1174,8 @@ def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, m
                 'lon': lon,
                 'prioridade': ponto.get('prioridade', 5),
                 'cameras': cameras_deste_ponto,
-                'is_ponto_minimo': True
+                'is_ponto_minimo': True,
+                'is_red': is_red  # ← ADICIONAR ESTA LINHA
             })
             
             for cruz_id, info in cruz_por_id.items():
@@ -1095,7 +1197,8 @@ def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, m
             motivo_limite = 'quantidade'
             break
         
-        cobertura_atual = ipe_coberto / ipe_total
+        # Usar cobertura ajustada (regra de 15%)
+        cobertura_atual = calcular_cobertura_ajustada_atual(ids_cobertos)
         if max_cruzamentos is None and max_cameras is None and cobertura_atual >= cobertura_frac:
             break
         
@@ -1135,7 +1238,9 @@ def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, m
         return pd.DataFrame(), 0.0, False, None, set(), df_pontos_minimos_usados, 0
     
     df_result = pd.DataFrame(selecionados) if selecionados else pd.DataFrame()
-    cobertura_real = ipe_coberto / ipe_total
+    
+    # Calcular cobertura real ajustada (regra de 15%)
+    cobertura_real = calcular_cobertura_ajustada_atual(ids_cobertos)
     
     if not df_result.empty:
         df_result['cobertura_acum'] = df_result['ipe_cruz'].cumsum() / ipe_total
@@ -1145,8 +1250,6 @@ def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, m
         motivo_limite = 'restricoes'
     
     return df_result, cobertura_real, alvo_atingido, motivo_limite, ids_cobertos, df_pontos_minimos_usados, total_cameras
-
-
 
 # ===== AJUSTE 3: FUNÇÃO criar_mapa SIMPLIFICADA =====
 def criar_mapa(cruzamentos_selecionados: pd.DataFrame, equipamentos: pd.DataFrame, 
@@ -1164,15 +1267,27 @@ def criar_mapa(cruzamentos_selecionados: pd.DataFrame, equipamentos: pd.DataFram
     # Pontos Mínimos
     if mostrar_pontos_minimos and pontos_minimos_usados is not None and not pontos_minimos_usados.empty:
         for _, p in pontos_minimos_usados.iterrows():
+            # ===== NOVO: CORES DIFERENTES PARA RED =====
+            is_red = p.get('is_red', False) or (str(p.get('tipo', '')).strip().upper() == 'RED')
+            
+            if is_red:
+                cor = "#10b981"  # Verde para RED
+                titulo = "📍 PONTO RED (Concessão)"
+            else:
+                cor = "#f6443b"  # Vermelho para outros
+                titulo = "📍 PONTO OBRIGATÓRIO"
+            # ===== FIM NOVO =====
+            
             popup_html = f"""<div style="font-size:0.8rem; min-width:180px;">
-                <strong>📍 PONTO OBRIGATÓRIO</strong><br/>
+                <strong>{titulo}</strong><br/>
                 <b>Motivo:</b> {p.get('tipo', 'N/A')}<br/>
                 <b>Logradouro:</b> {p.get('logradouro', 'N/A')}<br/>
-                <b>Prioridade:</b> {p.get('prioridade', 'N/A')}
+                <b>Prioridade:</b> {p.get('prioridade', 'N/A')}<br/>
+                <b>Câmeras:</b> {p.get('cameras', 1)}
             </div>"""
             folium.CircleMarker(
-                location=[p['lat'], p['lon']], radius=3, color="#f6443b",
-                fill=True, fillColor="#f6443b", fillOpacity=0.8, weight=2,
+                location=[p['lat'], p['lon']], radius=3, color=cor,
+                fill=True, fillColor=cor, fillOpacity=0.8, weight=2,
                 popup=folium.Popup(popup_html, max_width=250)
             ).add_to(m)
     
@@ -1217,7 +1332,7 @@ def gerar_csv_download(df_calculados: pd.DataFrame, df_selecionados: pd.DataFram
 # CARREGAMENTO INICIAL DOS ARQUIVOS
 # ============================================================
 if not st.session_state.arquivos_carregados:
-    carregar_arquivos_locais()
+    carregar_arquivos_locais(incluir_red=False)
 
 
 
@@ -1337,7 +1452,26 @@ with st.sidebar:
     #     limite_cob_log = None
     limite_cob_log = None
     
-    st.markdown('<div class="section-title">3. Pesos dos eixos IPE</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">3. Câmeras de Relógios Digitais</div>', unsafe_allow_html=True)
+    incluir_red = st.checkbox(
+        "Incluir câmeras de relórios digitais",
+        value=False,
+        key='incluir_red',
+        help="Pontos de relógios digitais (concessão) com 1 câmera sem custo por ponto"
+    )
+    
+    if incluir_red:
+        st.markdown("""<div class="info-box">
+            ℹ️ Câmeras de relórios digitais serão incluídas como <b>pontos mínimos prioritários</b>
+        </div>""", unsafe_allow_html=True)
+
+    if incluir_red != st.session_state.incluir_red_anterior:
+        st.session_state.incluir_red_anterior = incluir_red
+        pontos_min, msg = carregar_pontos_minimos(ARQUIVO_PRIORIDADES, incluir_red)
+        if pontos_min is not None:
+            st.session_state.pontos_minimos = pontos_min
+
+    st.markdown('<div class="section-title">4. Pesos dos eixos IPE</div>', unsafe_allow_html=True)
     peso_seg = st.slider("Seguranca", 0, 100, 15, key='peso_seg')
     peso_lct = st.slider("Lazer, Cultura e Turismo", 0, 100, 30, key='peso_lct')
     peso_com = st.slider("Comercial", 0, 100, 15, key='peso_com')
@@ -1378,7 +1512,8 @@ if not st.session_state.cruzamentos_calculados.empty:
     st.session_state.ultimo_selecionados, cobertura_real, alvo_atingido, motivo_limite, ids_cobertos, df_pontos_minimos_usados, total_cameras_usado = filtrar_por_cobertura_e_distancia(
         st.session_state.cruzamentos_calculados, cobertura_pct / 100, dist_min, 
         max_cruzamentos, raio_cobertura, limite_cob_log,
-        pontos_min_para_usar, max_cameras
+        pontos_min_para_usar, max_cameras,
+        st.session_state.logs
     )
 
 # ✅ ADICIONAR AQUI (após ids_cobertos ser calculado):
@@ -1406,7 +1541,7 @@ if not st.session_state.cruzamentos_calculados.empty and not alvo_atingido and m
             <span style="font-size: 1.2rem;">⚠️</span>
             <div style="flex: 1; font-size: 0.8rem; color: #fef3c7; line-height: 1.4;">
                 <strong>Cobertura alvo de {cobertura_pct}% não atingida.</strong> 
-                Cenário com máximo de {total_cameras_usado:,} câmeras possível, considerando a restrição de distância mínima: {dist_min}m. 
+                Cenário com máximo de {total_cameras_usado:,} câmeras possíveis, considerando a restrição de distância mínima: {dist_min}m. 
                 <em>O cenário apresentado simula o número máximo de câmeras necessárias para atingir a cobertura desejada dentro da restrição de distância mínima definida. É possível que existam soluções com menos câmeras que alcancem a mesma cobertura, devido ao incremento marginal decrescente (cada nova câmera adiciona menos ganho de cobertura).</em>
             </div>
         </div>
@@ -1466,8 +1601,29 @@ with col_stats:
         total_sel = len(df_sel)
         total_cobertos = len(ids_cobertos)
         
+        # ===== NOVO: SEPARAR ESTATÍSTICAS RED =====
         qtd_pontos_minimos = len(df_pontos_minimos_usados) if not df_pontos_minimos_usados.empty else 0
         cameras_pontos_minimos = df_pontos_minimos_usados['cameras'].sum() if not df_pontos_minimos_usados.empty and 'cameras' in df_pontos_minimos_usados.columns else 0
+        
+        # Separar RED dos outros
+        qtd_red = 0
+        cameras_red = 0
+        qtd_outros_minimos = 0
+        cameras_outros_minimos = 0
+        
+        if not df_pontos_minimos_usados.empty and 'is_red' in df_pontos_minimos_usados.columns:
+            df_red = df_pontos_minimos_usados[df_pontos_minimos_usados['is_red'] == True]
+            df_outros = df_pontos_minimos_usados[df_pontos_minimos_usados['is_red'] == False]
+            
+            qtd_red = len(df_red)
+            cameras_red = df_red['cameras'].sum() if not df_red.empty else 0
+            
+            qtd_outros_minimos = len(df_outros)
+            cameras_outros_minimos = df_outros['cameras'].sum() if not df_outros.empty else 0
+        else:
+            qtd_outros_minimos = qtd_pontos_minimos
+            cameras_outros_minimos = cameras_pontos_minimos
+        # ===== FIM NOVO =====
         
         qtd_pontos_ipe = total_sel
         cameras_pontos_ipe = df_sel['cameras'].sum() if not df_sel.empty and 'cameras' in df_sel.columns else 0
@@ -1476,7 +1632,10 @@ with col_stats:
         total_cameras = total_cameras_usado
 
         custo_unitario = 1610
-        custo_total_geral = total_cameras * custo_unitario
+        # ===== NOVO: DESCONTAR CUSTO DOS PONTOS RED =====
+        cameras_com_custo = total_cameras - cameras_red
+        custo_total_geral = cameras_com_custo * custo_unitario
+        # ===== FIM NOVO =====
         custo_formatado = f"R$ {custo_total_geral:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         
         # COBERTURA EFETIVA: cruzamentos cobertos pelo raio das câmeras
@@ -1582,34 +1741,39 @@ with col_stats:
         pct_vias_prioritarias = (qtd_vias_cobertas / total_vias * 100) if total_vias > 0 else 0        
 
         # EXIBIR ESTATÍSTICAS
+        
+        # EXIBIR ESTATÍSTICAS
         st.markdown("#### 📊 Pontos e Câmeras")
         
         stats_html = f"""<div class="stat-box">
             <div class="stat-row"><span>Total de pontos disponíveis:</span><span class="stat-value">{total_cruz:,}</span></div>"""
         
-        if qtd_pontos_minimos > 0:
+        # ===== NOVO: MOSTRAR RED SEPARADAMENTE =====
+        if qtd_outros_minimos > 0:
             stats_html += f"""
-            <div class="stat-row"><span>Pontos mínimos:</span><span class="stat-value">{qtd_pontos_minimos:,} pts ({int(cameras_pontos_minimos)} câm)</span></div>"""
+            <div class="stat-row"><span>Pontos mínimos (COP):</span><span class="stat-value">{qtd_outros_minimos:,} pts ({int(cameras_outros_minimos)} câm)</span></div>"""
+        
+        if qtd_red > 0:
+            stats_html += f"""
+            <div class="stat-row"><span>Pontos Relógios Digitais:</span><span class="stat-value">{qtd_red:,} pts ({int(cameras_red)} câm)</span></div>"""
+                
+        # ===== FIM NOVO =====
         
         stats_html += f"""
             <div class="stat-row"><span>Pontos otimizados:</span><span class="stat-value">{qtd_pontos_ipe:,} pts ({int(cameras_pontos_ipe)} câm)</span></div>
             <div class="stat-row"><span><b>Total de pontos:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_pontos:,}</span></div>
-            <div class="stat-row"><span><b>Total de câmeras:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_cameras:,}</span></div>
+            <div class="stat-row"><span><b>Total de câmeras:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_cameras:,}</span></div>"""
+        
+        # ===== NOVO: MOSTRAR CÂMERAS SEM CUSTO =====
+        if qtd_red > 0:
+            stats_html += f"""
+            <div class="stat-row"><span>• Com custo:</span><span class="stat-value">{int(cameras_com_custo)} câm</span></div>
+            <div class="stat-row"><span>• Sem custo (Relógios):</span><span class="stat-value">{int(cameras_red)} câm</span></div>"""
+        # ===== FIM NOVO =====
+        
+        stats_html += f"""
             <div class="stat-row"><span><b>Câmeras por 10 mil hab.:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_cameras/158.8376:.0f}</span></div>
             <div class="stat-row" style="margin-top: 5px; font-size: 1rem;"><span><b>Custo Total:</b></span><span class="stat-value" style="color: #4ade80;">{custo_formatado}</span></div>"""
-        
-        # stats_html += f"""</div>
-        # <div class="stat-box">
-        #     <div class="stat-row"><span><b>Total de pontos:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_pontos:,}</span></div>
-        #     <div class="stat-row"><span><b>Total de câmeras:</b></span><span class="stat-value" style="font-size: 1.1rem;">{total_cameras:,}</span></div>
-        #     <div class="stat-row" style="margin-top: 5px; font-size: 1rem;"><span><b>Custo Total:</b></span><span class="stat-value" style="color: #4ade80;">{custo_formatado}</span></div>"""        
-
-        # stats_html += f"""
-        #     <div class="stat-row"><span>Equipamentos:</span><span class="stat-value">{pct_equipamentos:.1f}%</span></div>
-        #     <div class="stat-row"><span>Comercial:</span><span class="stat-value">{pct_comercial:.1f}%</span></div>
-        #     <div class="stat-row"><span>Alagamentos:</span><span class="stat-value">{pct_alagamentos:.1f}%</span></div>
-        #     <div class="stat-row"><span>Sinistros:</span><span class="stat-value">{pct_sinistros:.1f}% ({qtd_sinistros_cobertos}/{total_sinistros})</span></div>
-        # </div>"""
         
         st.markdown(stats_html, unsafe_allow_html=True)
 
@@ -1715,6 +1879,9 @@ col_equip_lct, col_equip_com, col_alag = st.columns(3)
 
 col_sinist, col_cvp, col_vias = st.columns(3)
 
+# =============================================================================
+# 🏢 EQUIPAMENTOS (linha ~1457)
+# =============================================================================
 with col_equip_lct:
     if not st.session_state.equipamentos.empty and not st.session_state.cruzamentos_calculados.empty:
         df_todos_pontos = st.session_state.ultimo_selecionados.copy()
@@ -1747,6 +1914,8 @@ with col_equip_lct:
         
         if total_lct_seg > 0:
             html_main = ""
+            total_tipos = len(equipamentos_lct_seg)
+            
             for nome, qtd in equipamentos_lct_seg:
                 if nome and str(nome).strip() != "":
                     html_main += f'<div class="stat-row"><span>{nome}:</span><span class="stat-value">{qtd}</span></div>'
@@ -1754,10 +1923,10 @@ with col_equip_lct:
             st.markdown(f"#### 🏢 Equipamentos")
             st.markdown(f"""<div class="stat-box" style="margin-bottom: 1rem;">
                 <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
-                    <span><b>Cobertura:</b></span><span class="stat-value">{total_lct_seg} ({pct_lct_seg:.1f}%)</span>
+                    <span><b>Cobertura:</b></span><span class="stat-value">{total_lct_seg} equipamentos ({pct_lct_seg:.1f}%)</span>
                 </div>
                 <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
-                    {total_equipamentos_lct_seg} equipamentos totais mapeados.
+                    {total_equipamentos_lct_seg} equipamentos totais mapeados • Mostrando {total_tipos} tipos
                 </div>
                 <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
                     {html_main}
@@ -1778,6 +1947,9 @@ with col_equip_lct:
         st.markdown("#### 🏢 Equipamentos")
         st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
 
+# =============================================================================
+# 🏪 COMERCIAL (linha ~1500)
+# =============================================================================
 with col_equip_com:
     if not st.session_state.equipamentos.empty and not st.session_state.cruzamentos_calculados.empty:
         df_todos_pontos = st.session_state.ultimo_selecionados.copy()
@@ -1810,6 +1982,8 @@ with col_equip_com:
         
         if total_com > 0:
             html_com = ""
+            total_tipos = len(equipamentos_com)
+            
             for nome, qtd in equipamentos_com:
                 if nome and str(nome).strip() != "":
                     html_com += f'<div class="stat-row"><span>{nome}:</span><span class="stat-value">{qtd}</span></div>'
@@ -1817,10 +1991,10 @@ with col_equip_com:
             st.markdown(f"#### 🏪 Comercial")
             st.markdown(f"""<div class="stat-box" style="margin-bottom: 1rem;">
                 <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
-                    <span><b>Cobertura:</b></span><span class="stat-value">{total_com} ({pct_com:.1f}%)</span>
+                    <span><b>Cobertura:</b></span><span class="stat-value">{total_com} equipamentos ({pct_com:.1f}%)</span>
                 </div>
                 <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
-                    {total_equipamentos_com} equipamentos totais mapeados.
+                    {total_equipamentos_com} equipamentos totais mapeados • Mostrando {total_tipos} tipos
                 </div>
                 <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
                     {html_com}
@@ -1841,6 +2015,9 @@ with col_equip_com:
         st.markdown("#### 🏪 Comercial")
         st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
 
+# =============================================================================
+# 🌊 ALAGAMENTOS (linha ~1543)
+# =============================================================================
 with col_alag:
     if not st.session_state.cruzamentos_calculados.empty and not st.session_state.alagamentos.empty:
         df_todos_pontos_alag = st.session_state.ultimo_selecionados.copy()
@@ -1864,11 +2041,9 @@ with col_alag:
         
         html_alagamentos = ""
         if alagamentos_encontrados:
-            # Agrupar e contar alagamentos por nome
             from collections import Counter
             alagamentos_agrupados = Counter(alagamentos_encontrados)
             
-            # Ordenar por quantidade (decrescente) e depois por nome
             alagamentos_ordenados = sorted(
                 alagamentos_agrupados.items(), 
                 key=lambda x: (-x[1], x[0])
@@ -1883,10 +2058,10 @@ with col_alag:
         st.markdown("#### 🌊 Alagamentos")
         st.markdown(f"""<div class="stat-box">
             <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
-                <span><b>Cobertura:</b></span><span class="stat-value">{qtd_alag} ({pct_alag:.1f}%)</span>
+                <span><b>Cobertura:</b></span><span class="stat-value">{qtd_alag} pontos ({pct_alag:.1f}%)</span>
             </div>
             <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
-                {total_alvos_alagamento} pontos totais mapeados.
+                {total_alvos_alagamento} pontos totais mapeados
             </div>
             <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
                 {html_alagamentos}
@@ -1896,7 +2071,9 @@ with col_alag:
         st.markdown("#### 🌊 Alagamentos")
         st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
 
-
+# =============================================================================
+# 🚗 SINISTROS (linha ~1586)
+# =============================================================================
 with col_sinist:
     if not st.session_state.cruzamentos_calculados.empty and not st.session_state.sinistros.empty:
         df_todos_cobertos = st.session_state.cruzamentos_calculados[
@@ -1920,8 +2097,13 @@ with col_sinist:
                 qtd = int(row.get('qtd', 1))
                 sinistros_dict[log_norm] = qtd
             
-            for rua in logradouros_encontrados:
-                qtd_nesta_rua = sinistros_dict.get(rua, 0)
+            # Ordenar por quantidade de sinistros (decrescente)
+            logradouros_ordenados = sorted(
+                [(rua, sinistros_dict.get(rua, 0)) for rua in logradouros_encontrados],
+                key=lambda x: -x[1]
+            )
+            
+            for rua, qtd_nesta_rua in logradouros_ordenados:
                 rua_display = rua if len(rua) <= 50 else rua[:47] + "..."
                 html_sinistros += f'<div class="stat-row" style="justify-content: space-between;"><span style="color:#f87171; font-size: 0.7rem;">🚗 {rua_display}</span><span class="stat-value" style="font-size: 0.7rem;">{qtd_nesta_rua}</span></div>'
         else:
@@ -1930,10 +2112,10 @@ with col_sinist:
         st.markdown("#### 🚗 Sinistros")
         st.markdown(f"""<div class="stat-box">
             <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
-                <span><b>Cobertura:</b></span><span class="stat-value">{qtd_sinistros_cobertos}/{total_sinistros} ({pct_sinist:.1f}%)</span>
+                <span><b>Cobertura:</b></span><span class="stat-value">{qtd_sinistros_cobertos}/{total_sinistros} sinistros ({pct_sinist:.1f}%)</span>
             </div>
             <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
-                {qtd_ruas} de {total_ruas} ruas cobertas.
+                {qtd_ruas} de {total_ruas} ruas cobertas
             </div>
             <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
                 {html_sinistros}
@@ -1943,6 +2125,9 @@ with col_sinist:
         st.markdown("#### 🚗 Sinistros")
         st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
 
+# =============================================================================
+# 🚨 CVP
+# =============================================================================
 with col_cvp:
     if not st.session_state.cruzamentos_calculados.empty and not st.session_state.cvp.empty:
         df_todos_cobertos = st.session_state.cruzamentos_calculados[
@@ -1972,7 +2157,7 @@ with col_cvp:
                 key=lambda x: -x[1]
             )
             
-            for rua, qtd_cvp_nesta_rua in logradouros_ordenados[:20]:  # Limitar a 20 ruas
+            for rua, qtd_cvp_nesta_rua in logradouros_ordenados:
                 rua_display = rua if len(rua) <= 50 else rua[:47] + "..."
                 html_cvp += f'<div class="stat-row" style="justify-content: space-between;"><span style="color:#fca5a5; font-size: 0.7rem;">🚨 {rua_display}</span><span class="stat-value" style="font-size: 0.7rem;">{qtd_cvp_nesta_rua}</span></div>'
         else:
@@ -1981,10 +2166,10 @@ with col_cvp:
         st.markdown("#### 🚨 CVP")
         st.markdown(f"""<div class="stat-box">
             <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
-                <span><b>Cobertura:</b></span><span class="stat-value">{qtd_cvp_cobertos}/{total_cvp} ({pct_cvp:.1f}%)</span>
+                <span><b>Cobertura:</b></span><span class="stat-value">{qtd_cvp_cobertos}/{total_cvp} crimes ({pct_cvp:.1f}%)</span>
             </div>
             <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
-                {qtd_ruas_cvp} de {total_ruas_cvp} ruas cobertas.
+                {qtd_ruas_cvp} de {total_ruas_cvp} ruas cobertas
             </div>
             <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
                 {html_cvp}
@@ -1994,6 +2179,9 @@ with col_cvp:
         st.markdown("#### 🚨 CVP")
         st.markdown("""<div class="stat-box"><div class="stat-row"><span>Carregue os dados.</span></div></div>""", unsafe_allow_html=True)
 
+# =============================================================================
+# 🛣️ VIAS PRIORITÁRIAS
+# =============================================================================
 with col_vias:
     if not st.session_state.cruzamentos_calculados.empty and not st.session_state.vias_prioritarias.empty:
         df_todos_cobertos = st.session_state.cruzamentos_calculados[
@@ -2009,19 +2197,19 @@ with col_vias:
         
         html_vias = ""
         if vias_encontradas:
-            for via, prioridade in vias_encontradas[:20]:  # Limitar a 20 vias
+            for via, prioridade in vias_encontradas:
                 via_display = via if len(via) <= 50 else via[:47] + "..."
-                html_vias += f'<div class="stat-row" style="justify-content: space-between;"><span style="color:#93c5fd; font-size: 0.7rem;">🛣️ {via_display}</span><span class="stat-value" style="font-size: 0.7rem;"></div>'
+                html_vias += f'<div class="stat-row" style="justify-content: space-between;"><span style="color:#93c5fd; font-size: 0.7rem;">🛣️ {via_display}</span></div>'
         else:
             html_vias = '<div class="stat-row"><span>Nenhuma via prioritária coberta.</span></div>'
         
         st.markdown("#### 🛣️ Vias Prioritárias")
         st.markdown(f"""<div class="stat-box">
             <div class="stat-row" style="border-bottom: 1px solid rgba(148, 163, 184, 0.3); padding-bottom: 5px; margin-bottom: 5px;">
-                <span><b>Cobertura:</b></span><span class="stat-value">{qtd_vias_cobertas}/{total_vias} ({pct_vias:.1f}%)</span>
+                <span><b>Cobertura:</b></span><span class="stat-value">{qtd_vias_cobertas}/{total_vias} vias ({pct_vias:.1f}%)</span>
             </div>
             <div style="font-size: 0.7rem; color: #64748b; margin-bottom: 5px;">
-                Vias prioritárias cobertas por câmeras.
+                Vias prioritárias cobertas
             </div>
             <div style="max-height: 150px; overflow-y: auto; padding-right: 5px; font-size: 0.75rem;">
                 {html_vias}
