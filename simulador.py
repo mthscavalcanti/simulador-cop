@@ -1342,55 +1342,14 @@ if not st.session_state.arquivos_carregados:
 with st.sidebar:
     st.markdown("## 🎛️ Controles")
     
-    # st.markdown('<div class="section-title">📁 Estatísticas gerais</div>', unsafe_allow_html=True)
-    
-    # status_html = '<div class="stat-box">'
-    # if not st.session_state.logs.empty:
-    #     status_html += f'<div class="stat-row"><span>✓ Total de pontos:</span><span class="stat-value">{len(st.session_state.cruzamentos)}</span></div>'
-    # else:
-    #     status_html += '<div class="stat-row"><span>✗ Total de pontos:</span><span style="color:#ef4444;">Não carregado</span></div>'
-    
-    # if not st.session_state.pontos_minimos.empty:
-    #     status_html += f'<div class="stat-row"><span>✓ Pontos mínimos obrigatórios - COP:</span><span class="stat-value">{len(st.session_state.pontos_minimos)}</span></div>'
-    # else:
-    #     status_html += '<div class="stat-row"><span>✗ Pontos mínimos:</span><span style="color:#ef4444;">Não carregado</span></div>'
-    
-    # if not st.session_state.equipamentos.empty:
-    #     # status_html += f'<div class="stat-row"><span>✓ Principais equipamentos:</span><span class="stat-value">{len(st.session_state.equipamentos)}</span></div>'
-    #     status_html += f'<div class="stat-row"><span>✓ Principais equipamentos:</span><span class="stat-value">118</span></div>'
-    # else:
-    #     status_html += '<div class="stat-row"><span>✗ Principais equipamentos:</span><span style="color:#ef4444;">Não carregado</span></div>'
-    
-    # if not st.session_state.alagamentos.empty:
-    #     status_html += f'<div class="stat-row"><span>✓ Pontos de Alagamentos:</span><span class="stat-value">{len(st.session_state.alagamentos)}</span></div>'
-    # else:
-    #     status_html += '<div class="stat-row"><span>✗ Pontos de Alagamentos:</span><span style="color:#ef4444;">Não carregado</span></div>'
-    
-    # if not st.session_state.sinistros.empty:
-    #     total_sinistros_carregados = st.session_state.sinistros['qtd'].sum()
-    #     status_html += f'<div class="stat-row"><span>✓ Sinistros:</span><span class="stat-value">{total_sinistros_carregados} em {len(st.session_state.sinistros)} ruas</span></div>'
-    # else:
-    #     status_html += '<div class="stat-row"><span>✗ Sinistros:</span><span style="color:#ef4444;">Não carregado</span></div>'
-    
-    # if not st.session_state.vias_prioritarias.empty:
-    #     status_html += f'<div class="stat-row"><span>✓ Vias Prioritárias:</span><span class="stat-value">{len(st.session_state.vias_prioritarias)} vias</span></div>'
-    # else:
-    #     status_html += '<div class="stat-row"><span>✗ Vias Prioritárias:</span><span style="color:#ef4444;">Não carregado</span></div>'
-
-    # if st.session_state.bairros_geojson is not None:
-    #     status_html += '<div class="stat-row"><span>✓ Bairros:</span><span class="stat-value">Carregado</span></div>'
-    
-    # status_html += '</div>'
-    # st.markdown(status_html, unsafe_allow_html=True)
-    
-    # if st.button("🔄 Recarregar Arquivos", use_container_width=True):
-    #     st.session_state.arquivos_carregados = False
-    #     st.rerun()
-
-    # nota_min_equip = st.slider("Nota minima equipamentos", 1, 5, 4, key='nota_equip')
     nota_min_equip = 4
     
-    # ===== AJUSTE 1 E 2: FILTROS DE COBERTURA E LIMITE DE CÂMERAS =====
+    # ===== PRIMEIRO: VERIFICAR ESTADO DO RED PARA CALCULAR MÍNIMO =====
+    # Precisamos ler o estado anterior do checkbox antes de renderizar
+    if 'incluir_red_anterior' not in st.session_state:
+        st.session_state.incluir_red_anterior = False
+    
+    # ===== 1. LIMITE DE OTIMIZAÇÃO =====
     st.markdown('<div class="section-title">1. Limite de Otimização</div>', unsafe_allow_html=True)
     
     modo_limite = st.radio(
@@ -1401,9 +1360,8 @@ with st.sidebar:
     )
     
     if modo_limite == "Cobertura Alvo (%)":
-        # AJUSTE 1: Filtro de Cobertura Alvo Efetiva IPE
         cobertura_pct = st.slider(
-            "Cobertura alvo de risco otimizada (via 50%)", 
+            "Cobertura alvo de risco otimizada (via 15%)", 
             0, 100, 80, step=10, 
             key='cobertura_alvo',
             help="Percentual de cobertura otimizada do IPE a ser atingido"
@@ -1413,66 +1371,60 @@ with st.sidebar:
             ℹ️ O otimizador buscará atingir <b>{cobertura_pct}%</b> de cobertura efetiva, restrito à distância mínima entre câmeras.
         </div>''', unsafe_allow_html=True)
     else:
-        # AJUSTE 2: Limite Mínimo de 250 Câmeras
         cobertura_pct = 100
+        # Usar estado anterior do RED para definir mínimo
+        minimo_cameras = 357 if st.session_state.incluir_red_anterior else 250
+        
         max_cameras = st.number_input(
             "Máximo de câmeras", 
-            min_value=250,  # ← AJUSTE 2: LIMITE MÍNIMO
-            max_value=4500, 
-            value=500, 
+            min_value=minimo_cameras,  # ← DINÂMICO: 357 se RED ativo, 250 se não
+            max_value=4032, 
+            value=max(500, minimo_cameras),  # Garante que valor padrão >= mínimo
             step=10, 
             key='max_cameras',
-            help="Limite total de câmeras no sistema (50% dos pontos = 3 câm, 30% = 2 câm, 20% = 1 câm). Mínimo: 250 câmeras"
+            help=f"Limite total de câmeras no sistema (50% dos pontos = 3 câm, 30% = 2 câm, 20% = 1 câm). Mínimo: {minimo_cameras} câmeras"
         )
+    
         st.markdown(f'''<div class="info-box">
-            ℹ️ Limite fixo de <b>{max_cameras}</b> câmeras (distribuição: 50% dos pontos com 3 câm, 30% com 2 câm, 20% com 1 câm)
-        </div>''', unsafe_allow_html=True)
+                ℹ️ Limite fixo de <b>{max_cameras}</b> câmeras (distribuição: 50% dos pontos com 3 câm, 30% com 2 câm, 20% com 1 câm)
+            </div>''', unsafe_allow_html=True)
     
     max_cruzamentos = None
-    # ===== FIM AJUSTE 1 E 2 =====
     
-    st.markdown('<div class="section-title">2. Distancia minima entre câmeras</div>', unsafe_allow_html=True)
-    dist_min = st.slider("Distancia (m)", 200, 500, 300, step=100, key='dist_min', help="Distancia minima entre câmeras que compartilham o mesmo logradouro")
+    # ===== 2. DISTÂNCIA MÍNIMA =====
+    st.markdown('<div class="section-title">2. Distância mínima entre câmeras</div>', unsafe_allow_html=True)
+    dist_min = st.slider("Distância (m)", 200, 500, 300, step=100, key='dist_min', help="Distância mínima entre câmeras que compartilham o mesmo logradouro")
     
-    # st.markdown('<div class="section-title">3b. Raio de cobertura das cameras</div>', unsafe_allow_html=True)
-    # raio_cobertura = st.slider("Raio (m)",50, 250, 50, step=50, key='raio_cobertura')
-    raio_cobertura=50
-    raio_equipamento=100
-    
-    # st.markdown('<div class="section-title">4. Limite de cobertura por logradouro</div>', unsafe_allow_html=True)
-    # usar_limite_log = st.checkbox("Limitar cobertura por rua", value=False, key='usar_limite_log',
-    #                                help="Evita concentracao de cameras em uma unica rua")
-    # if usar_limite_log:
-    #     limite_cob_log = st.slider("Maximo por logradouro (%)", 10, 100, 50, step=5, key='limite_log',
-    #                                 help="Limita quanto do IPE de cada rua pode ser coberto") / 100
-    #     st.markdown(f"""<div class="info-box">
-    #         ℹ️ Cada rua tera no maximo <b>{limite_cob_log*100:.0f}%</b> do seu IPE coberto
-    #     </div>""", unsafe_allow_html=True)
-    # else:
-    #     limite_cob_log = None
+    raio_cobertura = 50
+    raio_equipamento = 100
     limite_cob_log = None
     
+    # ===== 3. CÂMERAS DE RELÓGIOS DIGITAIS =====
     st.markdown('<div class="section-title">3. Câmeras de Relógios Digitais</div>', unsafe_allow_html=True)
     incluir_red = st.checkbox(
-        "Incluir câmeras de relórios digitais",
-        value=False,
+        "Incluir câmeras de relógios digitais",
+        value=st.session_state.incluir_red_anterior,  # Mantém o estado anterior
         key='incluir_red',
         help="Pontos de relógios digitais (concessão) com 1 câmera sem custo por ponto"
     )
     
     if incluir_red:
         st.markdown("""<div class="info-box">
-            ℹ️ Câmeras de relórios digitais serão incluídas como <b>pontos mínimos prioritários</b>
+            ℹ️ Câmeras de relógios digitais serão incluídas como <b>pontos mínimos prioritários</b> (1 câmera sem custo cada)
         </div>""", unsafe_allow_html=True)
 
+    # Recarregar pontos mínimos se checkbox mudou
     if incluir_red != st.session_state.incluir_red_anterior:
         st.session_state.incluir_red_anterior = incluir_red
         pontos_min, msg = carregar_pontos_minimos(ARQUIVO_PRIORIDADES, incluir_red)
         if pontos_min is not None:
             st.session_state.pontos_minimos = pontos_min
-
+        # Forçar rerun para atualizar o mínimo de câmeras na seção 1
+        st.rerun()
+    
+    # ===== 4. PESOS DOS EIXOS IPE =====
     st.markdown('<div class="section-title">4. Pesos dos eixos IPE</div>', unsafe_allow_html=True)
-    peso_seg = st.slider("Seguranca", 0, 100, 15, key='peso_seg')
+    peso_seg = st.slider("Segurança", 0, 100, 15, key='peso_seg')
     peso_lct = st.slider("Lazer, Cultura e Turismo", 0, 100, 30, key='peso_lct')
     peso_com = st.slider("Comercial", 0, 100, 15, key='peso_com')
     peso_mob = st.slider("Mobilidade", 0, 100, 40, key='peso_mob')
@@ -1487,7 +1439,6 @@ with st.sidebar:
         <span class="chip">Com {w_com*100:.0f}%</span>
         <span class="chip">Mob {w_mob*100:.0f}%</span>
     </div>""", unsafe_allow_html=True)
-
 
 
 # ============================================================
