@@ -6,6 +6,8 @@ from streamlit_folium import st_folium
 import json
 import math
 from pathlib import Path
+from shapely.geometry import Polygon, MultiPolygon, box, shape
+from shapely.ops import unary_union
 
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -1257,26 +1259,120 @@ def criar_mapa(cruzamentos_selecionados: pd.DataFrame, equipamentos: pd.DataFram
                pontos_minimos_usados: pd.DataFrame = None, mostrar_pontos_minimos: bool = True,
                mostrar_pontos_ipe: bool = True) -> folium.Map:
     """Cria o mapa com os cruzamentos, equipamentos e pontos mínimos"""
-    m = folium.Map(location=[-8.07, -34.91], zoom_start=12, tiles='CartoDB positron')
     
+    # Calcular bounds do GeoJSON se disponível
     if bairros_geojson is not None:
-        folium.GeoJson(bairros_geojson, style_function=lambda x: {
-            'fillColor': 'transparent', 'color': '#6b7280', 'weight': 2, 'fillOpacity': 0
-        }).add_to(m)
+        all_coords = []
+        for feature in bairros_geojson.get('features', []):
+            geom = feature.get('geometry', {})
+            geom_type = geom.get('type', '')
+            coords = geom.get('coordinates', [])
+            
+            if geom_type == 'Polygon':
+                for ring in coords:
+                    all_coords.extend(ring)
+            elif geom_type == 'MultiPolygon':
+                for polygon in coords:
+                    for ring in polygon:
+                        all_coords.extend(ring)
+        
+        if all_coords:
+            lons = [c[0] for c in all_coords]
+            lats = [c[1] for c in all_coords]
+            
+            center_lat = (min(lats) + max(lats)) / 2
+            center_lon = (min(lons) + max(lons)) / 2
+            
+            m = folium.Map(
+                location=[center_lat, center_lon],
+                zoom_start=12,
+                tiles='CartoDB positron',
+                min_zoom=11,
+                max_zoom=18,
+                max_bounds=True
+            )
+            
+            m.fit_bounds([[min(lats), min(lons)], [max(lats), max(lons)]])
+        else:
+            m = folium.Map(
+                location=[-8.05, -34.95],
+                zoom_start=12,
+                tiles='CartoDB positron',
+                min_zoom=11,
+                max_zoom=18
+            )
+    else:
+        m = folium.Map(
+            location=[-8.05, -34.95],
+            zoom_start=12,
+            tiles='CartoDB positron',
+            min_zoom=11,
+            max_zoom=18
+        )
+    
+    # Adicionar máscara escura FORA do Recife
+    if bairros_geojson is not None:
+        # Criar geometria invertida usando shapely
+        from shapely.geometry import Polygon, MultiPolygon, box, shape
+        from shapely.ops import unary_union
+        
+        # Criar um retângulo grande que cobre toda a área visível
+        outer_box = box(-36.5, -9.0, -33.0, -7.5)
+        
+        # Extrair as geometrias dos bairros do Recife
+        recife_polygons = []
+        for feature in bairros_geojson.get('features', []):
+            geom = shape(feature['geometry'])
+            recife_polygons.append(geom)
+        
+        # Unir todos os polígonos do Recife em uma única geometria
+        recife_union = unary_union(recife_polygons)
+        
+        # Subtrair Recife do retângulo grande (área fora do Recife)
+        mask_geometry = outer_box.difference(recife_union)
+        
+        # Converter de volta para GeoJSON
+        mask_geojson = {
+            "type": "Feature",
+            "geometry": mask_geometry.__geo_interface__
+        }
+        
+        # Adicionar máscara ao mapa
+        folium.GeoJson(
+            mask_geojson,
+            style_function=lambda x: {
+                'fillColor': '#000000',
+                'color': 'transparent',
+                'weight': 0,
+                'fillOpacity': 0.7
+            },
+            name='Máscara Externa'
+        ).add_to(m)
+    
+    # Adicionar borda dos bairros do Recife
+    if bairros_geojson is not None:
+        folium.GeoJson(
+            bairros_geojson,
+            style_function=lambda x: {
+                'fillColor': 'transparent',
+                'color': '#6b7280',
+                'weight': 2,
+                'fillOpacity': 0
+            },
+            name='Limites do Recife'
+        ).add_to(m)
     
     # Pontos Mínimos
     if mostrar_pontos_minimos and pontos_minimos_usados is not None and not pontos_minimos_usados.empty:
         for _, p in pontos_minimos_usados.iterrows():
-            # ===== NOVO: CORES DIFERENTES PARA RED =====
             is_red = p.get('is_red', False) or (str(p.get('tipo', '')).strip().upper() == 'RED')
             
             if is_red:
-                cor = "#10b981"  # Verde para RED
+                cor = "#10b981"
                 titulo = "📍 PONTO RED (Concessão)"
             else:
-                cor = "#f6443b"  # Vermelho para outros
+                cor = "#f6443b"
                 titulo = "📍 PONTO OBRIGATÓRIO"
-            # ===== FIM NOVO =====
             
             popup_html = f"""<div style="font-size:0.8rem; min-width:180px;">
                 <strong>{titulo}</strong><br/>
@@ -1306,7 +1402,6 @@ def criar_mapa(cruzamentos_selecionados: pd.DataFrame, equipamentos: pd.DataFram
             ).add_to(m)
     
     return m
-# ===== FIM AJUSTE 3 =====
 
 
 def gerar_csv_download(df_calculados: pd.DataFrame, df_selecionados: pd.DataFrame) -> bytes:
