@@ -1257,7 +1257,7 @@ def criar_mapa(cruzamentos_selecionados: pd.DataFrame, equipamentos: pd.DataFram
                pontos_minimos_usados: pd.DataFrame = None, mostrar_pontos_minimos: bool = True,
                mostrar_pontos_ipe: bool = True) -> folium.Map:
     """Cria o mapa com os cruzamentos, equipamentos e pontos mínimos"""
-    m = folium.Map(location=[-8.07, -34.91], zoom_start=12, tiles='OpenStreetMap')
+    m = folium.Map(location=[-8.07, -34.91], zoom_start=12, tiles='CartoDB positron')
     
     if bairros_geojson is not None:
         folium.GeoJson(bairros_geojson, style_function=lambda x: {
