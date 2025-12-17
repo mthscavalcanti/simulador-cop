@@ -1442,7 +1442,10 @@ if not st.session_state.arquivos_carregados:
 # SIDEBAR - CONTROLES COM AJUSTES 1 E 2
 # ============================================================
 with st.sidebar:
-    st.markdown("## 🎛️ Controles")
+
+    st.image(str('data/cop_aquila.png'), use_container_width=True)
+
+    # st.markdown("## 🎛️ Controles")
     
     nota_min_equip = 4
     
