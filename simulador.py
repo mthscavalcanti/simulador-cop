@@ -49,16 +49,30 @@ st.markdown("""
         font-weight: 700;
         margin-bottom: 0.3rem;
     }
-    [data-testid="stSidebar"] {
-        min-width: 400px;
-        width: 400px;
-        overflow-y: auto;
+    /* Remover overflow de TODOS os containers da sidebar */
+    [data-testid="stSidebar"],
+    [data-testid="stSidebar"] > div,
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+        overflow: visible !important;
     }
+    
+    /* Aplicar scroll APENAS no container principal da sidebar */
+    section[data-testid="stSidebar"] {
+        min-width: 400px;
+        max-width: 400px;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        height: 100vh !important;
+        transform: none !important;
+        visibility: visible !important;
+        position: relative !important;
+    }
+    
     [data-testid="stSidebar"] > div:first-child {
         width: 400px;
-        overflow-y: auto;
-        height: 100vh;
+        padding-bottom: 3rem;
     }
+    
     .section-title {
         font-size: 0.85rem;
         font-weight: 600;
@@ -100,11 +114,6 @@ st.markdown("""
     footer {visibility: hidden;}
     [data-testid="collapsedControl"] {display: none !important;}
     [data-testid="stSidebarCollapseButton"] {display: none !important;}
-    section[data-testid="stSidebar"] {
-        transform: none !important;
-        visibility: visible !important;
-        position: relative !important;
-    }
     iframe {
         border-radius: 8px;
     }
@@ -1428,8 +1437,6 @@ def gerar_csv_download(df_calculados: pd.DataFrame, df_selecionados: pd.DataFram
 # ============================================================
 if not st.session_state.arquivos_carregados:
     carregar_arquivos_locais(incluir_red=False)
-
-
 
 # ============================================================
 # SIDEBAR - CONTROLES COM AJUSTES 1 E 2
