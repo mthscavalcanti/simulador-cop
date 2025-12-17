@@ -1429,13 +1429,24 @@ def gerar_csv_download(df_calculados: pd.DataFrame, df_selecionados: pd.DataFram
 if not st.session_state.arquivos_carregados:
     carregar_arquivos_locais(incluir_red=False)
 
-
-
 # ============================================================
 # SIDEBAR - CONTROLES COM AJUSTES 1 E 2
 # ============================================================
 with st.sidebar:
-    st.markdown("## 🎛️ Controles")
+
+    with st.sidebar:
+        # ===== ADICIONAR IMAGEM =====
+        from pathlib import Path
+        import os
+        
+        IMAGEM_PATH = DATA_DIR / "cop_aquila.png"
+        
+        if IMAGEM_PATH.exists():
+            st.image(str(IMAGEM_PATH), use_container_width=True)
+        else:
+            st.warning(f"⚠️ Imagem não encontrada: {IMAGEM_PATH}")
+
+    # st.markdown("## 🎛️ Controles")
     
     nota_min_equip = 4
     
