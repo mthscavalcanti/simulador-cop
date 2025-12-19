@@ -158,12 +158,10 @@ if 'cruzamentos_calculados' not in st.session_state:
     st.session_state.cruzamentos_calculados = pd.DataFrame()
 if 'equipamentos' not in st.session_state:
     st.session_state.equipamentos = pd.DataFrame()
-# ===== AJUSTE 3: ESTADOS PARA CHECKBOXES (SIMPLIFICADO) =====
 if 'mostrar_pontos_minimos' not in st.session_state:
     st.session_state.mostrar_pontos_minimos = True
 if 'mostrar_pontos_ipe' not in st.session_state:
     st.session_state.mostrar_pontos_ipe = True
-# ===== FIM AJUSTE 3 =====
 if 'bairros_geojson' not in st.session_state:
     st.session_state.bairros_geojson = None
 if 'ultimo_selecionados' not in st.session_state:
@@ -176,7 +174,7 @@ if 'sinistros' not in st.session_state:
     st.session_state.sinistros = pd.DataFrame()
 if 'vias_prioritarias' not in st.session_state:
     st.session_state.vias_prioritarias = pd.DataFrame()
-if 'cvp' not in st.session_state:  # ← ADICIONAR ESTAS LINHAS
+if 'cvp' not in st.session_state: 
     st.session_state.cvp = pd.DataFrame()
 if 'arquivos_carregados' not in st.session_state:
     st.session_state.arquivos_carregados = False
@@ -1262,7 +1260,6 @@ def filtrar_por_cobertura_e_distancia(df: pd.DataFrame, cobertura_frac: float, m
     
     return df_result, cobertura_real, alvo_atingido, motivo_limite, ids_cobertos, df_pontos_minimos_usados, total_cameras
 
-# ===== AJUSTE 3: FUNÇÃO criar_mapa SIMPLIFICADA =====
 def criar_mapa(cruzamentos_selecionados: pd.DataFrame, equipamentos: pd.DataFrame, 
                nota_min_equip: int, bairros_geojson=None,
                pontos_minimos_usados: pd.DataFrame = None, mostrar_pontos_minimos: bool = True,
@@ -1663,25 +1660,6 @@ with col_mapa:
         st.session_state.mostrar_pontos_ipe
     )
     st_folium(mapa, width=None, height=650, returned_objects=[])
-    
-    # ===== AJUSTE 3: CHECKBOXES SIMPLIFICADOS ABAIXO DO MAPA =====
-    # st.markdown("---")
-    # col_check1, col_check2 = st.columns(2)
-    
-    # with col_check1:
-    #     st.session_state.mostrar_pontos_minimos = st.checkbox(
-    #         "📍 Mostrar Pontos Mínimos", 
-    #         value=st.session_state.mostrar_pontos_minimos, 
-    #         key='check_pontos_min'
-    #     )
-    
-    # with col_check2:
-    #     st.session_state.mostrar_pontos_ipe = st.checkbox(
-    #         "📊 Mostrar Pontos via IPE", 
-    #         value=st.session_state.mostrar_pontos_ipe, 
-    #         key='check_pontos_ipe'
-    #     )
-    # ===== FIM AJUSTE 3 =====
 
 
 with col_stats:
@@ -1931,31 +1909,6 @@ with col_stats:
         <div class="stat-row"><span>Mobilidade:</span><span class="stat-value">{cobertura_ajustada_eixos['mob']:.1f}%</span></div>
         </div>
         """, unsafe_allow_html=True)
-
-
-
-
-        # st.markdown("#### 🎯 Cobertura por Logradouro (Ajustada)")
-        # qtd_100 = cobertura_ajustada_eixos.get('qtd_100', 0)
-        # total_logs = cobertura_ajustada_eixos.get('total_logs', 0)
-        # st.markdown(f"""<div class="highlight-box">
-        #     <div class="stat-row" style="border-bottom: 1px solid rgba(34, 197, 94, 0.4); padding-bottom: 5px; margin-bottom: 5px;">
-        #         <span><b>Cobertura Total Ajustada:</b></span><span style="color: #86efac; font-weight: 700; font-size: 1.1rem;">{cobertura_ajustada_total:.1f}%</span>
-        #     </div>
-        #     <div style="font-size: 0.75rem; color: #86efac; margin-bottom: 3px;">
-        #         Logradouros com ≥50% → 100% | Logradouros com &lt;50% → mantém atual
-        #     </div>
-        #     <div style="font-size: 0.7rem; color: #64748b;">
-        #         {qtd_100} de {total_logs} logradouros atingiram 100% de cobertura
-        #     </div>
-        # </div>""", unsafe_allow_html=True)
-        
-        # st.markdown(f"""<div class="stat-box">
-        #     <div class="stat-row"><span>Seguranca:</span><span class="stat-value">{cobertura_ajustada_eixos['seg']:.1f}%</span></div>
-        #     <div class="stat-row"><span>Lazer, Cultura e Turismo:</span><span class="stat-value">{cobertura_ajustada_eixos['lct']:.1f}%</span></div>
-        #     <div class="stat-row"><span>Comercial:</span><span class="stat-value">{cobertura_ajustada_eixos['com']:.1f}%</span></div>
-        #     <div class="stat-row"><span>Mobilidade:</span><span class="stat-value">{cobertura_ajustada_eixos['mob']:.1f}%</span></div>
-        # </div>""", unsafe_allow_html=True)
         
         csv_data = gerar_csv_download(df_calc, df_sel)
         st.download_button("📥 Baixar CSV", csv_data, "ipe_cruzamentos.csv", "text/csv", use_container_width=True)
